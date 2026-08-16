@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "miniverse-sdk"
+version = "0.1.0"
+description = "Validate and upload Dollhouse Robotics Miniverse simulation bundles."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["keyring>=25,<26"]
+license = "LicenseRef-Proprietary"
+authors = [{ name = "Dollhouse Robotics" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.scripts]
+miniverse = "miniverse_sdk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+miniverse_sdk = ["agent_help/*.md"]

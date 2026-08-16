@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import tempfile
+import threading
+import unittest
+import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from unittest.mock import patch
+
+from miniverse_sdk.bundles import BundleValidationError, inspect_bundle
+from miniverse_sdk.cli import agent_help, main
+from miniverse_sdk.config import credential
+
+
+def fixture(path: Path) -> Path:
+    program = b"class Policy:\n    pass\n"
+    scene = b"glb-scene"
+    model = b"onnx-model"
+    digest = lambda value: hashlib.sha256(value).hexdigest()
+    manifest = {
+        "version": "dhr.simulation-bundle/v1", "id": "fixture", "name": "Fixture",
+        "primarySimulator": "mujoco", "primaryModel": "policy",
+        "scene": {"sha256": digest(scene)},
+        "models": [{"id": "policy", "sha256": digest(model)}],
+        "program": {"sourceSha256": digest(program)},
+    }
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("bundle.json", json.dumps(manifest))
+        archive.writestr("policy.py", program)
+        archive.writestr("scene.glb", scene)
+        archive.writestr("models/policy.onnx", model)
+    return path
+
+
+class Handler(BaseHTTPRequestHandler):
+    archive = b""
+    state = "created"
+    token = ""
+
+    def log_message(self, *_args):
+        pass
+
+    def _json(self, value, status=200):
+        body = json.dumps(value).encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.headers.get("authorization") != "Bearer test-token":
+            return self._json({"error": "unauthorized", "code": "access_required"}, 401)
+        length = int(self.headers.get("content-length", "0"))
+        value = json.loads(self.rfile.read(length) or b"{}")
+        if self.path == "/api/v1/bundle-imports":
+            Handler.token = value["archiveSha256"]
+            return self._json({"uploadId": "bup_fixture", "uploaded": False, "transfer": {"mode": "single", "url": f"http://127.0.0.1:{self.server.server_port}/r2/source"}, "statusUrl": "/api/v1/bundle-imports/bup_fixture"}, 201)
+        if self.path.endswith("/complete"):
+            Handler.state = "ready"
+            return self._json({"uploadId": "bup_fixture", "state": "ready", "statusUrl": "/api/v1/bundle-imports/bup_fixture"}, 202)
+        return self._json({"error": "not found"}, 404)
+
+    def do_PUT(self):
+        length = int(self.headers.get("content-length", "0"))
+        Handler.archive = self.rfile.read(length)
+        self.send_response(200)
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path == "/api/v1/bundle-imports/bup_fixture":
+            return self._json({"uploadId": "bup_fixture", "state": Handler.state, "archiveSha256": Handler.token, "bundleId": "fixture", "bundleDigest": "d" * 64})
+        return self._json({"error": "not found"}, 404)
+
+
+class CliTest(unittest.TestCase):
+    def test_validate_and_agent_help(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.dhsim")
+            inspected = inspect_bundle(path)
+            self.assertEqual(inspected.bundle_id, "fixture")
+            self.assertEqual(len(inspected.assets), 3)
+        self.assertIn("MINIVERSE_API_TOKEN", agent_help("auth", False))
+        self.assertIn("server verifies and expands", agent_help("upload", False))
+
+    def test_environment_token_is_the_noninteractive_auth_contract(self):
+        with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "environment-token"}, clear=False):
+            self.assertEqual(credential(), ("environment-token", "MINIVERSE_API_TOKEN"))
+
+    def test_rejects_undeclared_and_traversal_members(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.dhsim")
+            with zipfile.ZipFile(path, "a") as archive:
+                archive.writestr("extra.txt", "no")
+            with self.assertRaises(BundleValidationError) as caught:
+                inspect_bundle(path)
+            self.assertEqual(caught.exception.code, "undeclared_member")
+
+    def test_end_to_end_archive_upload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.dhsim")
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "test-token"}, clear=False):
+                    code = main(["--origin", f"http://127.0.0.1:{server.server_port}", "--json", "bundle", "upload", str(path)])
+                self.assertEqual(code, 0)
+                self.assertEqual(hashlib.sha256(Handler.archive).hexdigest(), Handler.token)
+            finally:
+                server.shutdown()
+                thread.join()
+                server.server_close()
+
+
+if __name__ == "__main__":
+    unittest.main()
