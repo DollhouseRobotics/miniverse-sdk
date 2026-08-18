@@ -101,6 +101,11 @@ def read_miniverse_precision(source: BinaryIO) -> str:
         else:
             raise OnnxMetadataError(f"ONNX uses unsupported protobuf wire type {wire}")
 
+    return validate_contract(metadata)
+
+
+def validate_contract(metadata: dict[str, str]) -> str:
+    """Validate collected ONNX metadata_props and return the declared precision."""
     if metadata.get(ONNX_SCHEMA_KEY) != ONNX_SCHEMA_VERSION:
         raise OnnxMetadataError(f"ONNX checkpoint must use Miniverse contract schema {ONNX_SCHEMA_VERSION}")
     raw_contract = metadata.get(ONNX_METADATA_KEY)

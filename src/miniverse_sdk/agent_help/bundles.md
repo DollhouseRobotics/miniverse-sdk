@@ -26,6 +26,19 @@ precision for each model, and the server-side importer is authoritative. Do not 
 a bundle after recording its archive hash. Preserve simulator profile, model,
 scene, embodiment, coordinate-frame, actuator-order, and provenance identities.
 
+Validation also statically scans each ONNX graph for TensorRT builder limits
+and reports `model_findings` (for example `tensorrt_topk_k_limit`: TopK `K`
+must be at most 3840, and a full sort lowers to TopK over the entire axis).
+Findings do not invalidate a bundle — the ONNX Runtime fallback still executes
+it — but Miniverse cannot derive TensorRT or TensorRT-RTX artifacts until they
+are fixed, so re-export the checkpoint before uploading. Pass `--strict` to
+fail validation on any finding. To lint a checkpoint during export iteration,
+before it is zipped into a bundle, run:
+
+```bash
+miniverse model validate PATH.onnx --json
+```
+
 ONNX is the developer-facing checkpoint submission artifact. Developers do not
 build or upload TensorRT, TensorRT-RTX, plan, or runtime-cache files; Miniverse
 derives and invalidates those artifacts internally.

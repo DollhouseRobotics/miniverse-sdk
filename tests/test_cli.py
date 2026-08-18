@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import struct
 import tempfile
 import threading
 import unittest
@@ -34,18 +35,47 @@ def _metadata_entry(key: str, value: str) -> bytes:
     return _field(14, entry)
 
 
-def model_with_precision(precision: str = "fp16") -> bytes:
+def _varint_field(number: int, value: int) -> bytes:
+    return _varint(number << 3) + _varint(value)
+
+
+def _node(op_type: str, inputs: tuple[str, ...] = (), outputs: tuple[str, ...] = (), attributes: bytes = b"") -> bytes:
+    encoded = b"".join(_field(1, name.encode()) for name in inputs)
+    encoded += b"".join(_field(2, name.encode()) for name in outputs)
+    encoded += _field(4, op_type.encode()) + attributes
+    return _field(1, encoded)
+
+
+def _int64_initializer(name: str, *values: int) -> bytes:
+    tensor = _varint_field(2, 7) + _field(8, name.encode()) + _field(9, b"".join(struct.pack("<q", value) for value in values))
+    return _field(5, tensor)
+
+
+def _topk_graph(k_value: int | None, *, constant_node: bool = False) -> bytes:
+    graph = _node("TopK", inputs=("logits", "k"), outputs=("values", "indices"))
+    if k_value is None:
+        return graph
+    if constant_node:
+        tensor = _varint_field(2, 7) + _field(9, struct.pack("<q", k_value))
+        attribute = _field(5, _field(1, b"value") + _field(5, tensor))
+        return graph + _node("Constant", outputs=("k",), attributes=attribute)
+    return graph + _int64_initializer("k", k_value)
+
+
+def model_with_precision(precision: str = "fp16", graph: bytes | None = None, opset: int = 18) -> bytes:
     contract = json.dumps({"schemaVersion": "0.2", "precision": precision}, separators=(",", ":"))
     return b"".join((
+        _field(7, graph or b""),
+        _field(8, _field(1, b"") + _varint_field(2, opset)),
         _metadata_entry("com.dollhouserobotics.miniverse.simulation_contract", contract),
         _metadata_entry("com.dollhouserobotics.miniverse.simulation_contract_schema_version", "0.2"),
     ))
 
 
-def fixture(path: Path) -> Path:
+def fixture(path: Path, model: bytes | None = None) -> Path:
     program = b"class Policy:\n    pass\n"
     scene = b"glb-scene"
-    model = model_with_precision()
+    model = model_with_precision() if model is None else model
     digest = lambda value: hashlib.sha256(value).hexdigest()
     manifest = {
         "version": "dhr.simulation-bundle/v1", "id": "fixture", "name": "Fixture",
@@ -113,6 +143,44 @@ class CliTest(unittest.TestCase):
             self.assertEqual(inspected.model_precisions, {"policy": "fp16"})
         self.assertIn("MINIVERSE_API_TOKEN", agent_help("auth", False))
         self.assertIn("server verifies and expands", agent_help("upload", False))
+
+    def test_tensorrt_compat_findings(self):
+        from io import BytesIO
+
+        from miniverse_sdk.onnx_compat import scan_model
+
+        scanned = scan_model(BytesIO(model_with_precision(graph=_topk_graph(64000))))
+        self.assertEqual([finding.code for finding in scanned.findings], ["tensorrt_topk_k_limit"])
+        self.assertEqual(scanned.precision, "fp16")
+        scanned = scan_model(BytesIO(model_with_precision(graph=_topk_graph(4096, constant_node=True))))
+        self.assertEqual([finding.code for finding in scanned.findings], ["tensorrt_topk_k_limit"])
+        scanned = scan_model(BytesIO(model_with_precision(graph=_topk_graph(3840))))
+        self.assertEqual(scanned.findings, ())
+        scanned = scan_model(BytesIO(model_with_precision(graph=_topk_graph(None))))
+        self.assertEqual([finding.code for finding in scanned.findings], ["tensorrt_topk_dynamic_k"])
+        attribute = _field(5, _field(1, b"k") + _varint_field(3, 64000))
+        graph = _node("TopK", inputs=("logits",), outputs=("values", "indices"), attributes=attribute)
+        scanned = scan_model(BytesIO(model_with_precision(graph=graph, opset=9)))
+        self.assertEqual([finding.code for finding in scanned.findings], ["tensorrt_topk_k_limit"])
+
+    def test_bundle_validate_reports_findings_and_strict_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.dhsim", model=model_with_precision(graph=_topk_graph(64000)))
+            inspected = inspect_bundle(path)
+            self.assertEqual([finding.code for finding in inspected.model_findings["policy"]], ["tensorrt_topk_k_limit"])
+            self.assertEqual(main(["bundle", "validate", str(path), "--json"]), 0)
+            self.assertEqual(main(["bundle", "validate", str(path), "--strict"]), 2)
+            clean = fixture(Path(directory) / "clean.dhsim", model=model_with_precision(graph=_topk_graph(3840)))
+            self.assertEqual(main(["bundle", "validate", str(clean), "--strict"]), 0)
+
+    def test_model_validate_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.onnx"
+            path.write_bytes(model_with_precision(graph=_topk_graph(64000)))
+            self.assertEqual(main(["model", "validate", str(path), "--json"]), 0)
+            self.assertEqual(main(["model", "validate", str(path), "--strict"]), 2)
+            path.write_bytes(model_with_precision(graph=_topk_graph(3840)))
+            self.assertEqual(main(["model", "validate", str(path), "--strict"]), 0)
 
     def test_missing_and_invalid_precision_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

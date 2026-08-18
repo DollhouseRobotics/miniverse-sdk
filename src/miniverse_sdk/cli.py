@@ -13,10 +13,14 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from dataclasses import asdict
+
 from . import __version__
 from .api import ApiError, Client
 from .bundles import BundleValidationError, inspect_bundle
 from .config import credential, delete_oauth_token, origin, save_oauth_token
+from .onnx_compat import CompatFinding, scan_model
+from .onnx_metadata import OnnxMetadataError
 
 TOPICS = {"auth", "bundles", "upload", "sessions"}
 
@@ -115,6 +119,7 @@ def parser() -> argparse.ArgumentParser:
     bundle_commands = bundle.add_subparsers(dest="bundle_command", required=True)
     validate = bundle_commands.add_parser("validate")
     validate.add_argument("bundle")
+    validate.add_argument("--strict", action="store_true", help="Fail when any model compatibility finding is present")
     validate.add_argument("--json", action="store_true", dest="command_json")
     inspect = bundle_commands.add_parser("inspect")
     inspect.add_argument("bundle")
@@ -125,6 +130,12 @@ def parser() -> argparse.ArgumentParser:
     upload.add_argument("--no-wait", action="store_true")
     upload.add_argument("--timeout", type=int, default=3600)
     upload.add_argument("--json", action="store_true", dest="command_json")
+    model = commands.add_parser("model")
+    model_commands = model.add_subparsers(dest="model_command", required=True)
+    model_validate = model_commands.add_parser("validate", help="Lint one ONNX checkpoint for metadata and TensorRT compatibility")
+    model_validate.add_argument("model")
+    model_validate.add_argument("--strict", action="store_true", help="Fail when any compatibility finding is present")
+    model_validate.add_argument("--json", action="store_true", dest="command_json")
     status = bundle_commands.add_parser("status")
     status.add_argument("upload_id")
     status.add_argument("--json", action="store_true", dest="command_json")
@@ -134,6 +145,14 @@ def parser() -> argparse.ArgumentParser:
     publish.add_argument("bundle_version", help="Bundle version as <id>@<digest>")
     publish.add_argument("--json", action="store_true", dest="command_json")
     return root
+
+
+def _strict_failure(model_findings: dict[str, tuple[CompatFinding, ...]]) -> BundleValidationError:
+    details = {model: [asdict(finding) for finding in findings] for model, findings in model_findings.items()}
+    total = sum(len(findings) for findings in details.values())
+    error = BundleValidationError("model_compatibility", f"strict validation found {total} model compatibility finding(s)")
+    error.details = details
+    return error
 
 
 def run(args: argparse.Namespace) -> Any:
@@ -149,9 +168,23 @@ def run(args: argparse.Namespace) -> Any:
             return {"authenticated": False, "source": "none"}
         token, source = credential()
         return {"authenticated": bool(token), "source": source}
+    if args.command == "model":
+        path = Path(args.model)
+        if not path.is_file():
+            raise BundleValidationError("model_missing", f"model does not exist: {path}")
+        try:
+            with path.open("rb") as source:
+                scanned = scan_model(source)
+        except OnnxMetadataError as error:
+            raise BundleValidationError("invalid_model_metadata", str(error)) from error
+        if args.strict and scanned.findings:
+            raise _strict_failure({path.stem: scanned.findings})
+        return {"ok": not scanned.findings, "precision": scanned.precision, "findings": [asdict(finding) for finding in scanned.findings]}
     if args.command == "bundle":
         if args.bundle_command in {"validate", "inspect"}:
             inspected = inspect_bundle(args.bundle)
+            if getattr(args, "strict", False) and inspected.model_findings:
+                raise _strict_failure(inspected.model_findings)
             return {"ok": True, **inspected.as_dict(include_manifest=args.bundle_command == "inspect")}
         token, _ = credential()
         client = Client(origin(args.origin), token)
@@ -178,7 +211,8 @@ def main(argv: list[str] | None = None) -> int:
             emit(value, bool(args.json or getattr(args, "command_json", False)))
         return 0
     except BundleValidationError as error:
-        emit({"ok": False, "code": error.code, "error": str(error)}, True)
+        details = getattr(error, "details", None)
+        emit({"ok": False, "code": error.code, "error": str(error), **({"findings": details} if details else {})}, True)
         return 2
     except ApiError as error:
         emit({"ok": False, "code": error.code, "status": error.status, "error": str(error)}, True)

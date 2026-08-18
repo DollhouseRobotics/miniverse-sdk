@@ -10,7 +10,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .onnx_metadata import OnnxMetadataError, read_miniverse_precision
+from .onnx_compat import CompatFinding, scan_model
+from .onnx_metadata import OnnxMetadataError
 
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_EXPANDED_BYTES = 4 * 1024 * 1024 * 1024
@@ -47,6 +48,7 @@ class BundleInspection:
     program_source: str
     assets: tuple[AssetInspection, ...]
     model_precisions: dict[str, str]
+    model_findings: dict[str, tuple[CompatFinding, ...]]
     manifest: dict[str, Any]
 
     def as_dict(self, include_manifest: bool = False) -> dict[str, Any]:
@@ -188,6 +190,7 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             raise BundleValidationError("undeclared_member", f"bundle contains undeclared members: {', '.join(sorted(undeclared))}")
         assets: list[AssetInspection] = []
         model_precisions: dict[str, str] = {}
+        model_findings: dict[str, tuple[CompatFinding, ...]] = {}
         for archive_name, (kind, expected_hash) in expected.items():
             actual_hash, size = _sha256_stream(archive, archive_name)
             if actual_hash != expected_hash:
@@ -197,9 +200,13 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             if kind == "model":
                 try:
                     with archive.open(archive_name) as source:
-                        model_precisions[PurePosixPath(archive_name).stem] = read_miniverse_precision(source)
+                        scanned = scan_model(source)
                 except OnnxMetadataError as error:
                     raise BundleValidationError("invalid_model_metadata", f"{archive_name}: {error}") from error
+                model_id = PurePosixPath(archive_name).stem
+                model_precisions[model_id] = scanned.precision
+                if scanned.findings:
+                    model_findings[model_id] = scanned.findings
             assets.append(AssetInspection(kind=kind, path=archive_name, sha256=actual_hash, bytes=size))
         try:
             program_source = archive.read("policy.py").decode("utf-8")
@@ -209,5 +216,5 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             path=str(bundle_path), archive_sha256=archive_sha256, archive_bytes=archive_bytes,
             bundle_id=bundle_id, name=name, primary_simulator=simulator,
             program_sha256=program_hash, program_source=program_source,
-            assets=tuple(assets), model_precisions=model_precisions, manifest=manifest,
+            assets=tuple(assets), model_precisions=model_precisions, model_findings=model_findings, manifest=manifest,
         )
