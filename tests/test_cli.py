@@ -16,10 +16,36 @@ from miniverse_sdk.cli import agent_help, main
 from miniverse_sdk.config import credential
 
 
+def _varint(value: int) -> bytes:
+    result = bytearray()
+    while value > 0x7F:
+        result.append((value & 0x7F) | 0x80)
+        value >>= 7
+    result.append(value)
+    return bytes(result)
+
+
+def _field(number: int, value: bytes) -> bytes:
+    return _varint((number << 3) | 2) + _varint(len(value)) + value
+
+
+def _metadata_entry(key: str, value: str) -> bytes:
+    entry = _field(1, key.encode()) + _field(2, value.encode())
+    return _field(14, entry)
+
+
+def model_with_precision(precision: str = "fp16") -> bytes:
+    contract = json.dumps({"schemaVersion": "0.2", "precision": precision}, separators=(",", ":"))
+    return b"".join((
+        _metadata_entry("com.dollhouserobotics.miniverse.simulation_contract", contract),
+        _metadata_entry("com.dollhouserobotics.miniverse.simulation_contract_schema_version", "0.2"),
+    ))
+
+
 def fixture(path: Path) -> Path:
     program = b"class Policy:\n    pass\n"
     scene = b"glb-scene"
-    model = b"onnx-model"
+    model = model_with_precision()
     digest = lambda value: hashlib.sha256(value).hexdigest()
     manifest = {
         "version": "dhr.simulation-bundle/v1", "id": "fixture", "name": "Fixture",
@@ -84,8 +110,30 @@ class CliTest(unittest.TestCase):
             inspected = inspect_bundle(path)
             self.assertEqual(inspected.bundle_id, "fixture")
             self.assertEqual(len(inspected.assets), 3)
+            self.assertEqual(inspected.model_precisions, {"policy": "fp16"})
         self.assertIn("MINIVERSE_API_TOKEN", agent_help("auth", False))
         self.assertIn("server verifies and expands", agent_help("upload", False))
+
+    def test_missing_and_invalid_precision_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.dhsim")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            for precision in ("tf32", None):
+                model = model_with_precision(str(precision)) if precision is not None else _metadata_entry(
+                    "com.dollhouserobotics.miniverse.simulation_contract_schema_version", "0.2"
+                )
+                values["models/policy.onnx"] = model
+                values["bundle.json"] = json.dumps({
+                    **json.loads(values["bundle.json"]),
+                    "models": [{"id": "policy", "sha256": hashlib.sha256(model).hexdigest()}],
+                }).encode()
+                with zipfile.ZipFile(path, "w") as archive:
+                    for name, value in values.items():
+                        archive.writestr(name, value)
+                with self.assertRaises(BundleValidationError) as caught:
+                    inspect_bundle(path)
+                self.assertEqual(caught.exception.code, "invalid_model_metadata")
 
     def test_environment_token_is_the_noninteractive_auth_contract(self):
         with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "environment-token"}, clear=False):

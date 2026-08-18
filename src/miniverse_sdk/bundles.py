@@ -10,6 +10,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .onnx_metadata import OnnxMetadataError, read_miniverse_precision
+
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_EXPANDED_BYTES = 4 * 1024 * 1024 * 1024
 MAX_ENTRIES = 64
@@ -44,6 +46,7 @@ class BundleInspection:
     program_sha256: str
     program_source: str
     assets: tuple[AssetInspection, ...]
+    model_precisions: dict[str, str]
     manifest: dict[str, Any]
 
     def as_dict(self, include_manifest: bool = False) -> dict[str, Any]:
@@ -184,12 +187,19 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         if undeclared:
             raise BundleValidationError("undeclared_member", f"bundle contains undeclared members: {', '.join(sorted(undeclared))}")
         assets: list[AssetInspection] = []
+        model_precisions: dict[str, str] = {}
         for archive_name, (kind, expected_hash) in expected.items():
             actual_hash, size = _sha256_stream(archive, archive_name)
             if actual_hash != expected_hash:
                 raise BundleValidationError("hash_mismatch", f"{archive_name} does not match its declared SHA-256")
             if kind in {"robot", "visual"} and size != int(manifest[kind]["bytes"]):
                 raise BundleValidationError("size_mismatch", f"{archive_name} does not match its declared byte length")
+            if kind == "model":
+                try:
+                    with archive.open(archive_name) as source:
+                        model_precisions[PurePosixPath(archive_name).stem] = read_miniverse_precision(source)
+                except OnnxMetadataError as error:
+                    raise BundleValidationError("invalid_model_metadata", f"{archive_name}: {error}") from error
             assets.append(AssetInspection(kind=kind, path=archive_name, sha256=actual_hash, bytes=size))
         try:
             program_source = archive.read("policy.py").decode("utf-8")
@@ -199,5 +209,5 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             path=str(bundle_path), archive_sha256=archive_sha256, archive_bytes=archive_bytes,
             bundle_id=bundle_id, name=name, primary_simulator=simulator,
             program_sha256=program_hash, program_source=program_source,
-            assets=tuple(assets), manifest=manifest,
+            assets=tuple(assets), model_precisions=model_precisions, manifest=manifest,
         )
