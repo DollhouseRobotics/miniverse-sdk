@@ -30,7 +30,9 @@ K > 3,840. Capping K changes sampling behavior — usually unacceptably. Top-p
 threshold, findable by a fixed-iteration bisection of elementwise compares and
 reductions, and inverse-CDF sampling draws the identical distribution in plain
 vocabulary order (the rank is the token id — no sorted indices, no Gather).
-See the reference implementation in `examples/gpc/gpc_export_factory.py`.
+When bisecting, compare kept tokens against the bracket's LOW edge: the true
+threshold equals the boundary token's own probability and the high edge
+converges to it from above, so comparing high drops that token.
 
 **Keep every `TopK` K a graph constant.** Shape-derived or otherwise dynamic
 K cannot be verified at build time and fails compilation.
