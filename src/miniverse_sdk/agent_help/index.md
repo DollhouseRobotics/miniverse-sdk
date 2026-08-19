@@ -20,6 +20,12 @@ Read the relevant topic before acting:
 ```bash
 miniverse agent-help auth
 miniverse agent-help bundles
+miniverse agent-help onnx
 miniverse agent-help upload
 miniverse agent-help sessions
 ```
+
+Read `onnx` BEFORE exporting a checkpoint: it lists the TensorRT-RTX
+compatibility rules (no full-axis sorts, static TopK K, no data-dependent
+control flow) that determine whether Miniverse can serve the checkpoint
+through optimized inference instead of the ONNX fallback.

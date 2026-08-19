@@ -272,13 +272,13 @@ def _topk_findings(node: _Node, state: _GraphState, opset: int) -> list[CompatFi
         return [CompatFinding(
             code="tensorrt_topk_dynamic_k", severity="warning", op_type=node.op_type, node=label,
             message=f"TopK K is not statically resolvable; TensorRT requires K <= {TENSORRT_MAX_TOPK_K} at build time",
-            hint="export K as a graph constant so the TensorRT compiler can verify it",
+            hint="export K as a graph constant so the TensorRT compiler can verify it; see `miniverse agent-help onnx`",
         )]
     if k > TENSORRT_MAX_TOPK_K:
         return [CompatFinding(
             code="tensorrt_topk_k_limit", severity="warning", op_type=node.op_type, node=label,
             message=f"TopK K={k} exceeds the TensorRT maximum of {TENSORRT_MAX_TOPK_K}; TensorRT and TensorRT-RTX will reject this graph and Miniverse cannot derive optimized artifacts",
-            hint=f"re-export the checkpoint with the sampler's TopK capped at K={TENSORRT_MAX_TOPK_K} (a full sort lowers to TopK over the entire axis)",
+            hint="a full sort lowers to TopK over the entire axis; top-p sampling does not need one — re-export with threshold-bisection nucleus selection and a vocabulary-order inverse CDF (see `miniverse agent-help onnx`); capping K changes sampling behavior",
         )]
     return []
 

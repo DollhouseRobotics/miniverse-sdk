@@ -22,7 +22,7 @@ from .config import credential, delete_oauth_token, origin, save_oauth_token
 from .onnx_compat import CompatFinding, scan_model
 from .onnx_metadata import OnnxMetadataError
 
-TOPICS = {"auth", "bundles", "upload", "sessions"}
+TOPICS = {"auth", "bundles", "upload", "sessions", "onnx"}
 
 
 def emit(value: Any, as_json: bool = False) -> None:
