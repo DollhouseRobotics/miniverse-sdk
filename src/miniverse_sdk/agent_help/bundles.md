@@ -1,17 +1,29 @@
 # Bundle validation
 
-A `.dhsim` archive contains `bundle.json`, `policy.py`, `scene.glb`, one or more
-`models/<id>.onnx` files, and optional `robot/mjcf.zip` and
-`visual/robot.glb`. Every executable or binary member is SHA-256-bound by the
-manifest.
+A `.dhsim` archive contains exactly `bundle.json`, `policy.py`, mandatory
+`embodiment/mjcf.zip`, and one or more `models/<id>.onnx` files. Miniverse
+derives SHA-256 and byte identities from those included files. Do not put
+hashes, a `scene`, `seed`, `robot`, `visual`, `primaryModel`, model providers,
+or model loading policy in `bundle.json`.
+
+The environment is `builtin/flat-ground-v1`. The Python controller declares
+its physics/policy/publication timing, owns randomness, sees all models through
+`context.models`, constructs all inputs from `PolicyStep.sim_data`, and returns
+physical actuation in canonical MJCF actuator order. Optional `metadata` is a
+freeform JSON object and has no execution semantics.
+
+Use `embodiment.dynamicsOverrides` for actuator values. Use
+`embodiment.bodyDynamicsOverrides` for exact named-body linear/angular damping
+and maximum linear/angular velocity. Those per-body fields run on the two
+Isaac PhysX profiles and produce a descriptive runtime error on MuJoCo.
 
 Each ONNX checkpoint must be self-contained and embed all Miniverse policy
 metadata in
 `com.dollhouserobotics.miniverse.simulation_contract`. Do not create an
 adjacent JSON manifest. The embedded contract must include:
 
-- complete input/observation mappings;
-- complete output/action mappings;
+- complete model tensor shapes and dtypes;
+- model outputs consumed explicitly by controller code;
 - `precision: fp32 | fp16 | bf16`.
 
 Precision is the requested Miniverse inference/compiler precision; it does not
@@ -24,7 +36,7 @@ Run `miniverse bundle validate PATH.dhsim --json` before upload. Treat local
 validation as feedback; its `model_precisions` result reports the discovered
 precision for each model, and the server-side importer is authoritative. Do not alter
 a bundle after recording its archive hash. Preserve simulator profile, model,
-scene, embodiment, coordinate-frame, actuator-order, and provenance identities.
+embodiment, coordinate-frame, and actuator-order identities.
 
 Validation also statically scans each ONNX graph for TensorRT builder limits
 and reports `model_findings` (for example `tensorrt_topk_k_limit`: TopK `K`

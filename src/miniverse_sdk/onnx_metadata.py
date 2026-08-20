@@ -11,7 +11,7 @@ ONNX_SCHEMA_VERSION = "0.3"
 SUPPORTED_PRECISIONS = ("fp32", "fp16", "bf16")
 MAX_METADATA_ENTRY_BYTES = 512 * 1024
 
-SIMULATORS = ("mujoco-cpu", "isaac-sim", "isaac-sim-gpu-physx")
+SIMULATORS = ("mujoco-cpu", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx")
 CONTACT_SUPPORT = {
     "netForce": SIMULATORS,
     "impulse": SIMULATORS,

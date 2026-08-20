@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import stat
 import zipfile
 from dataclasses import asdict, dataclass
@@ -17,7 +18,8 @@ MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_EXPANDED_BYTES = 4 * 1024 * 1024 * 1024
 MAX_ENTRIES = 64
 MAX_COMPRESSION_RATIO = 200
-SIMULATORS = {"mujoco", "isaac-sim", "isaac-sim-gpu-physx"}
+SIMULATORS = {"mujoco", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"}
+SOURCE_FIELDS = {"version", "id", "name", "description", "primarySimulator", "compatibleSimulators", "embodiment", "models", "program", "commands", "ui", "gizmos", "webModules", "metadata"}
 
 
 class BundleValidationError(ValueError):
@@ -89,6 +91,36 @@ def _string(value: Any, label: str, maximum: int = 256) -> str:
     return value
 
 
+def _validate_body_dynamics_overrides(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list) or len(value) > 64:
+        raise BundleValidationError("invalid_manifest", "embodiment.bodyDynamicsOverrides must be an array with at most 64 entries")
+    seen: set[str] = set()
+    fields = {"linearDamping", "angularDamping", "maximumLinearVelocity", "maximumAngularVelocity"}
+    for index, raw in enumerate(value):
+        override = _object(raw, f"body dynamics override {index}")
+        if set(override) != {"bodyGroup", "bodyIds", "set"}:
+            raise BundleValidationError("invalid_manifest", f"body dynamics override {index} must contain only bodyGroup, bodyIds, and set")
+        group = _string(override.get("bodyGroup"), f"body dynamics override {index} bodyGroup", 128)
+        body_ids = override.get("bodyIds")
+        if not isinstance(body_ids, list) or not 1 <= len(body_ids) <= 128 or any(not isinstance(item, str) for item in body_ids) or len(set(body_ids)) != len(body_ids):
+            raise BundleValidationError("invalid_manifest", f"body dynamics override {group} requires unique bodyIds")
+        for body_id_value in body_ids:
+            body_id = _string(body_id_value, f"body dynamics override {group} body id", 128)
+            if body_id in seen:
+                raise BundleValidationError("invalid_manifest", f"embodiment body {body_id} is overridden more than once")
+            seen.add(body_id)
+        updates = _object(override.get("set"), f"body dynamics override {group} set")
+        if not updates or set(updates) - fields:
+            raise BundleValidationError("invalid_manifest", f"body dynamics override {group} set contains no values or unsupported fields")
+        for field, raw_value in updates.items():
+            if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)) or not math.isfinite(float(raw_value)) or float(raw_value) < 0:
+                raise BundleValidationError("invalid_manifest", f"body dynamics override {group} {field} must be a finite non-negative number")
+            if field.startswith("maximum") and float(raw_value) == 0:
+                raise BundleValidationError("invalid_manifest", f"body dynamics override {group} {field} must be greater than zero")
+
+
 def _hash(value: Any, label: str) -> str:
     text = _string(value, label, 64)
     if len(text) != 64 or any(character not in "0123456789abcdef" for character in text):
@@ -141,7 +173,7 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         raise BundleValidationError("invalid_zip", "bundle is not a valid ZIP archive") from error
     with archive:
         members = _safe_members(archive)
-        required = {"bundle.json", "policy.py", "scene.glb"}
+        required = {"bundle.json", "policy.py", "embodiment/mjcf.zip"}
         missing = required - members.keys()
         if missing:
             raise BundleValidationError("missing_member", f"bundle is missing {', '.join(sorted(missing))}")
@@ -150,20 +182,31 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
             raise BundleValidationError("invalid_manifest", "bundle.json must be valid UTF-8 JSON") from error
         manifest = _object(manifest, "bundle manifest")
-        if "policyBindings" in manifest:
-            raise BundleValidationError("invalid_manifest", "policyBindings was removed; bundle controllers always construct model inputs from SimData")
+        removed = sorted(set(manifest) & {"policyBindings", "scene", "seed", "robot", "visual", "primaryModel", "provenance"})
+        if removed:
+            raise BundleValidationError("invalid_manifest", f"bundle fields were removed: {', '.join(removed)}")
+        unknown = sorted(set(manifest) - SOURCE_FIELDS)
+        if unknown:
+            raise BundleValidationError("invalid_manifest", f"bundle manifest contains unknown fields: {', '.join(unknown)}")
+        if manifest.get("version") != "v1":
+            raise BundleValidationError("invalid_manifest", "bundle version must be v1")
         bundle_id = _string(manifest.get("id"), "bundle id", 128)
         name = _string(manifest.get("name", bundle_id), "bundle name", 160)
         simulator = _string(manifest.get("primarySimulator"), "primarySimulator", 32)
         if simulator not in SIMULATORS:
             raise BundleValidationError("invalid_manifest", "primarySimulator is unsupported")
+        compatible = manifest.get("compatibleSimulators", [])
+        if not isinstance(compatible, list) or any(value not in SIMULATORS or value == simulator for value in compatible) or len(set(compatible)) != len(compatible):
+            raise BundleValidationError("invalid_manifest", "compatibleSimulators must contain distinct supported non-primary simulators")
+        embodiment = _object(manifest.get("embodiment"), "embodiment")
+        if set(embodiment) - {"appearance", "dynamicsOverrides", "bodyDynamicsOverrides"}:
+            raise BundleValidationError("invalid_manifest", "embodiment accepts appearance, dynamicsOverrides, and bodyDynamicsOverrides; its MJCF is supplied by embodiment/mjcf.zip")
+        _validate_body_dynamics_overrides(embodiment.get("bodyDynamicsOverrides"))
         program = _object(manifest.get("program"), "program")
-        program_hash = _hash(program.get("sourceSha256"), "program.sourceSha256")
-        scene = _object(manifest.get("scene"), "scene")
-        expected: dict[str, tuple[str, str]] = {
-            "policy.py": ("program", program_hash),
-            "scene.glb": ("scene", _hash(scene.get("sha256"), "scene.sha256")),
-        }
+        if set(program) != {"apiVersion", "entrypoint"} or program.get("apiVersion") != "dhr.python-policy/v1":
+            raise BundleValidationError("invalid_manifest", "program must contain only apiVersion and entrypoint")
+        _string(program.get("entrypoint"), "program.entrypoint", 200)
+        expected: dict[str, str] = {"policy.py": "program", "embodiment/mjcf.zip": "embodiment"}
         models = manifest.get("models")
         if not isinstance(models, list) or not 1 <= len(models) <= 8:
             raise BundleValidationError("invalid_manifest", "bundle must declare between one and eight models")
@@ -174,17 +217,9 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             if model_id in model_ids:
                 raise BundleValidationError("invalid_manifest", f"duplicate model id {model_id!r}")
             model_ids.add(model_id)
-            expected[f"models/{model_id}.onnx"] = ("model", _hash(model.get("sha256"), f"model {model_id} sha256"))
-        primary_model = manifest.get("primaryModel")
-        if primary_model not in model_ids:
-            raise BundleValidationError("invalid_manifest", "primaryModel must name a declared model")
-        for kind, archive_name, manifest_key in (("robot", "robot/mjcf.zip", "robot"), ("visual", "visual/robot.glb", "visual")):
-            if manifest.get(manifest_key) is not None:
-                asset = _object(manifest[manifest_key], manifest_key)
-                expected[archive_name] = (kind, _hash(asset.get("sha256"), f"{manifest_key}.sha256"))
-                declared_bytes = asset.get("bytes")
-                if not isinstance(declared_bytes, int) or declared_bytes <= 0:
-                    raise BundleValidationError("invalid_manifest", f"{manifest_key}.bytes must be a positive integer")
+            if set(model) != {"id"}:
+                raise BundleValidationError("invalid_manifest", f"model {model_id} accepts only id; hashes and providers are derived by Miniverse")
+            expected[f"models/{model_id}.onnx"] = "model"
         undeclared = set(members) - set(expected) - {"bundle.json"}
         missing_assets = set(expected) - set(members)
         if missing_assets:
@@ -194,12 +229,11 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         assets: list[AssetInspection] = []
         model_precisions: dict[str, str] = {}
         model_findings: dict[str, tuple[CompatFinding, ...]] = {}
-        for archive_name, (kind, expected_hash) in expected.items():
+        program_hash = ""
+        for archive_name, kind in expected.items():
             actual_hash, size = _sha256_stream(archive, archive_name)
-            if actual_hash != expected_hash:
-                raise BundleValidationError("hash_mismatch", f"{archive_name} does not match its declared SHA-256")
-            if kind in {"robot", "visual"} and size != int(manifest[kind]["bytes"]):
-                raise BundleValidationError("size_mismatch", f"{archive_name} does not match its declared byte length")
+            if kind == "program":
+                program_hash = actual_hash
             if kind == "model":
                 try:
                     with archive.open(archive_name) as source:

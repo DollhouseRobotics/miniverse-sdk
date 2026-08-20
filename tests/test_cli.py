@@ -74,22 +74,19 @@ def model_with_precision(precision: str = "fp16", graph: bytes | None = None, op
 
 def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: bool = False) -> Path:
     program = b"class Policy:\n    pass\n"
-    scene = b"glb-scene"
+    embodiment = b"mjcf-archive"
     model = model_with_precision() if model is None else model
-    digest = lambda value: hashlib.sha256(value).hexdigest()
     manifest = {
-        "version": "dhr.simulation-bundle/v1", "id": "fixture", "name": "Fixture",
-        "primarySimulator": "mujoco", "primaryModel": "policy",
-        "scene": {"sha256": digest(scene)},
-        "models": [{"id": "policy", "sha256": digest(model)}],
-        "program": {"sourceSha256": digest(program)},
+        "version": "v1", "id": "fixture", "name": "Fixture", "primarySimulator": "mujoco",
+        "embodiment": {}, "models": [{"id": "policy"}],
+        "program": {"apiVersion": "dhr.python-policy/v1", "entrypoint": "policy:Policy"},
     }
     if legacy_policy_bindings:
         manifest["policyBindings"] = {"source": "embedded-model-contract", "modelId": "policy"}
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("bundle.json", json.dumps(manifest))
         archive.writestr("policy.py", program)
-        archive.writestr("scene.glb", scene)
+        archive.writestr("embodiment/mjcf.zip", embodiment)
         archive.writestr("models/policy.onnx", model)
     return path
 
@@ -140,14 +137,14 @@ class CliTest(unittest.TestCase):
         from miniverse_sdk.onnx_metadata import compatibility_report
 
         report = compatibility_report({
-            "backends": [{"id": "isaac-sim"}],
+            "backends": [{"id": "isaac-sim-cpu-physx"}],
             "inputs": [{"name": "obs", "slices": [{"provider": "contacts", "component": "normalForce"}]}],
         })
         row = report["inputs"]["obs"][0]
         self.assertEqual(row["operation"], "contacts.normalForce")
         self.assertEqual(row["supportedSimulators"], ["mujoco-cpu"])
-        self.assertEqual(row["isaac-sim"], "unsupported")
-        self.assertEqual(report["incompatible"], ["obs:contacts.normalForce@isaac-sim"])
+        self.assertEqual(row["isaac-sim-cpu-physx"], "unsupported")
+        self.assertEqual(report["incompatible"], ["obs:contacts.normalForce@isaac-sim-cpu-physx"])
 
     def test_validate_and_agent_help(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -162,7 +159,7 @@ class CliTest(unittest.TestCase):
     def test_bundle_rejects_removed_policy_bindings(self):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(Path(directory) / "legacy.dhsim", legacy_policy_bindings=True)
-            with self.assertRaisesRegex(BundleValidationError, "policyBindings was removed"):
+            with self.assertRaisesRegex(BundleValidationError, "fields were removed: policyBindings"):
                 inspect_bundle(path)
 
     def test_tensorrt_compat_findings(self):
@@ -215,7 +212,7 @@ class CliTest(unittest.TestCase):
                 values["models/policy.onnx"] = model
                 values["bundle.json"] = json.dumps({
                     **json.loads(values["bundle.json"]),
-                    "models": [{"id": "policy", "sha256": hashlib.sha256(model).hexdigest()}],
+                    "models": [{"id": "policy"}],
                 }).encode()
                 with zipfile.ZipFile(path, "w") as archive:
                     for name, value in values.items():
