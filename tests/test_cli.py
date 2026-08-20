@@ -63,12 +63,12 @@ def _topk_graph(k_value: int | None, *, constant_node: bool = False) -> bytes:
 
 
 def model_with_precision(precision: str = "fp16", graph: bytes | None = None, opset: int = 18) -> bytes:
-    contract = json.dumps({"schemaVersion": "0.2", "precision": precision}, separators=(",", ":"))
+    contract = json.dumps({"schemaVersion": "0.3", "precision": precision}, separators=(",", ":"))
     return b"".join((
         _field(7, graph or b""),
         _field(8, _field(1, b"") + _varint_field(2, opset)),
         _metadata_entry("com.dollhouserobotics.miniverse.simulation_contract", contract),
-        _metadata_entry("com.dollhouserobotics.miniverse.simulation_contract_schema_version", "0.2"),
+        _metadata_entry("com.dollhouserobotics.miniverse.simulation_contract_schema_version", "0.3"),
     ))
 
 
@@ -189,7 +189,7 @@ class CliTest(unittest.TestCase):
                 values = {name: archive.read(name) for name in archive.namelist()}
             for precision in ("tf32", None):
                 model = model_with_precision(str(precision)) if precision is not None else _metadata_entry(
-                    "com.dollhouserobotics.miniverse.simulation_contract_schema_version", "0.2"
+                    "com.dollhouserobotics.miniverse.simulation_contract_schema_version", "0.3"
                 )
                 values["models/policy.onnx"] = model
                 values["bundle.json"] = json.dumps({

@@ -22,10 +22,24 @@ from .onnx_metadata import (
     _discard,
     _entry_fields,
     _read_varint,
-    validate_contract,
+    parse_contract,
 )
 
 TENSORRT_MAX_TOPK_K = 3840
+
+# Mirror of the runtime import allowlist (runtime/src/miniverse/contracts.py).
+# A checkpoint using any op outside this set is rejected at bundle import
+# regardless of TensorRT compatibility, so the lint reports it as an error.
+RUNTIME_ALLOWED_OPS = {
+    "Abs", "Add", "And", "ArgMax", "Atan", "Cast", "Clip", "Concat", "Constant", "Cos",
+    "ConstantOfShape", "Div", "Equal", "Erf", "Exp", "Expand", "Flatten", "Floor",
+    "Gather", "GatherElements", "Gemm", "Greater", "GreaterOrEqual", "Identity", "IsNaN", "LayerNormalization",
+    "LessOrEqual",
+    "LeakyRelu", "Less", "Log", "MatMul", "Max", "Min", "Mul", "Neg",
+    "Mod", "Not", "OneHot", "Or", "Pow", "ReduceL2", "ReduceMax", "ReduceMean", "ReduceMin", "ReduceSum",
+    "Relu", "Reshape", "ScatterElements", "Shape", "Sigmoid", "Slice", "Softmax",
+    "Sign", "Sin", "Split", "Sqrt", "Squeeze", "Sub", "Tanh", "Tile", "TopK", "Transpose", "Unsqueeze", "Where", "Xor", "CumSum",
+}
 MAX_STRING_BYTES = 64 * 1024
 MAX_GRAPH_DEPTH = 8
 _INTEGER_TENSOR_FORMATS = {6: "<i", 7: "<q", 12: "<I", 13: "<Q"}
@@ -46,6 +60,7 @@ class CompatFinding:
 class ModelScan:
     precision: str
     findings: tuple[CompatFinding, ...]
+    contract: dict | None = None
 
 
 class _Bounded:
@@ -138,6 +153,8 @@ class _GraphState:
     def __init__(self) -> None:
         self.nodes: list[_Node] = []
         self.constants: dict[str, tuple[int, ...]] = {}
+        self.initializer_names: set[str] = set()
+        self.io_dims: dict[str, tuple[int | None, ...]] = {}
 
 
 def _parse_tensor(source: _Bounded) -> tuple[str, tuple[int, ...] | None]:
@@ -252,8 +269,76 @@ def _parse_graph(source: _Bounded, state: _GraphState, depth: int) -> None:
             _parse_node(_Bounded(source, _length(source)), state, depth)
         elif number == 5 and wire == 2:
             name, values = _parse_tensor(_Bounded(source, _length(source)))
+            if name:
+                state.initializer_names.add(name)
             if name and values is not None:
                 state.constants[name] = values
+        elif number in (11, 12) and wire == 2 and depth == 1:
+            name, dims = _parse_value_info(_Bounded(source, _length(source)))
+            if name:
+                state.io_dims[name] = dims
+        else:
+            _skip_value(source, wire)
+
+
+def _parse_value_info(source: _Bounded) -> tuple[str, tuple[int | None, ...]]:
+    """Extract a ValueInfoProto name and its tensor dims (None = dynamic)."""
+    name = ""
+    dims: tuple[int | None, ...] = ()
+
+    def parse_shape(shape: _Bounded) -> tuple[int | None, ...]:
+        values: list[int | None] = []
+        while True:
+            tag = _read_varint(shape, allow_eof=True)
+            if tag is None:
+                return tuple(values)
+            number, wire = tag >> 3, tag & 7
+            if number == 1 and wire == 2:
+                dim = _Bounded(shape, _length(shape))
+                resolved: int | None = None
+                while True:
+                    dim_tag = _read_varint(dim, allow_eof=True)
+                    if dim_tag is None:
+                        break
+                    dim_number, dim_wire = dim_tag >> 3, dim_tag & 7
+                    if dim_number == 1 and dim_wire == 0:
+                        resolved = _length(dim)
+                    else:
+                        _skip_value(dim, dim_wire)
+                values.append(resolved)
+            else:
+                _skip_value(shape, wire)
+
+    def parse_type(kind: _Bounded) -> tuple[int | None, ...]:
+        values: tuple[int | None, ...] = ()
+        while True:
+            tag = _read_varint(kind, allow_eof=True)
+            if tag is None:
+                return values
+            number, wire = tag >> 3, tag & 7
+            if number == 1 and wire == 2:
+                tensor = _Bounded(kind, _length(kind))
+                while True:
+                    tensor_tag = _read_varint(tensor, allow_eof=True)
+                    if tensor_tag is None:
+                        break
+                    tensor_number, tensor_wire = tensor_tag >> 3, tensor_tag & 7
+                    if tensor_number == 2 and tensor_wire == 2:
+                        values = parse_shape(_Bounded(tensor, _length(tensor)))
+                    else:
+                        _skip_value(tensor, tensor_wire)
+            else:
+                _skip_value(kind, wire)
+
+    while True:
+        tag = _read_varint(source, allow_eof=True)
+        if tag is None:
+            return name, dims
+        number, wire = tag >> 3, tag & 7
+        if number == 1 and wire == 2:
+            name = _string(source)
+        elif number == 2 and wire == 2:
+            dims = parse_type(_Bounded(source, _length(source)))
         else:
             _skip_value(source, wire)
 
@@ -329,11 +414,29 @@ def scan_model(source: BinaryIO) -> ModelScan:
                 metadata[key] = value
         else:
             _skip_value(source, wire)
-    precision = validate_contract(metadata)
+    contract = parse_contract(metadata)
+    precision = str(contract["precision"])
     opset = opsets.get("", 0)
     findings: list[CompatFinding] = []
+    seen_disallowed: set[str] = set()
     for node in state.nodes:
         rule = _NODE_RULES.get(node.op_type)
         if rule is not None:
             findings.extend(rule(node, state, opset))
-    return ModelScan(precision=precision, findings=tuple(findings))
+        if node.op_type and node.op_type not in RUNTIME_ALLOWED_OPS and node.op_type not in seen_disallowed:
+            seen_disallowed.add(node.op_type)
+            findings.append(CompatFinding(
+                code="runtime_op_allowlist", severity="error", op_type=node.op_type, node=node.label or "unnamed node",
+                message=f"operator {node.op_type} is outside the Miniverse runtime allowlist and the checkpoint will be rejected at bundle import",
+                hint="re-export the graph using allowlisted deterministic tensor ops; control flow (If/Loop/Scan) must be unrolled and recurrence expressed as explicit state tensors",
+            ))
+    for name, dims in state.io_dims.items():
+        if name in state.initializer_names:
+            continue
+        if any(value is None or value <= 0 for value in dims) or not dims:
+            findings.append(CompatFinding(
+                code="tensorrt_dynamic_shape", severity="error", op_type="", node=name,
+                message=f"tensor {name} has a dynamic or missing dimension; the contract requires static shapes and the TensorRT-RTX AOT builder has no optimization profile",
+                hint="export with fixed batch-one shapes (dynamic_axes=None); fixed-batch derivatives are generated server-side",
+            ))
+    return ModelScan(precision=precision, findings=tuple(findings), contract=contract)

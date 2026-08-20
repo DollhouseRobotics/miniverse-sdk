@@ -18,7 +18,7 @@ Precision is the requested Miniverse inference/compiler precision; it does not
 assert that every tensor in the ONNX graph has that dtype. Missing and unknown
 precision values are rejected. Exporters using
 `miniverse.contracts.embed_onnx_contract` should pass
-`{"schemaVersion": "0.2", "precision": "fp16", ...}`.
+`{"schemaVersion": "0.3", "precision": "fp16", ...}`.
 
 Run `miniverse bundle validate PATH.dhsim --json` before upload. Treat local
 validation as feedback; its `model_precisions` result reports the discovered

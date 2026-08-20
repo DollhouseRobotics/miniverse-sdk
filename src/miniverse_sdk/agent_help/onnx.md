@@ -14,12 +14,24 @@ graph bytes by hand.
 
 ## Contract requirements
 
-- Opset 18, static shapes, batch size exactly 1 on every input and output.
-- Embed the Miniverse simulation contract (schema 0.2) in the model metadata,
+- Opset 13–21 (18 recommended), static shapes, batch size exactly 1 on every
+  input and output.
+- Embed the Miniverse simulation contract (schema 0.3) in the model metadata,
   including `precision` (`fp32`, `fp16`, or `bf16`). Weights stay fp32 in the
   ONNX; `precision` declares the execution precision the compilers target.
 - Export a single policy step. Do not bake fixed-batch variants; the server
   derives what it needs.
+- Every graph op must be on the runtime allowlist (deterministic tensor math
+  only); `miniverse model validate` reports violations as errors.
+- Recurrent policies declare `stateBindings` pairing a state input with a
+  same-shape state output; the runtime owns allocation, feedback, and reset.
+- Temporal features come from declarative `historyBuffers` (capacity +
+  `sampleOffsets` over any provider source), not from hand-rolled buffers.
+- Actuator-target outputs are physical values: v0.3 has no output
+  `scale`/`offset`. Bake PD scaling and decoding into the graph.
+- `miniverse model validate` also prints a per-input provider fulfillment
+  matrix against each simulator profile; fix `unfulfillable` rows before
+  uploading.
 
 ## TensorRT compatibility rules
 

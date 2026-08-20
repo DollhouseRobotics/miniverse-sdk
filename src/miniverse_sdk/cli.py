@@ -179,7 +179,15 @@ def run(args: argparse.Namespace) -> Any:
             raise BundleValidationError("invalid_model_metadata", str(error)) from error
         if args.strict and scanned.findings:
             raise _strict_failure({path.stem: scanned.findings})
-        return {"ok": not scanned.findings, "precision": scanned.precision, "findings": [asdict(finding) for finding in scanned.findings]}
+        from .onnx_metadata import fulfillment_report
+
+        fulfillment = fulfillment_report(scanned.contract or {})
+        return {
+            "ok": not scanned.findings and not fulfillment["unfulfillable"],
+            "precision": scanned.precision,
+            "findings": [asdict(finding) for finding in scanned.findings],
+            "fulfillment": fulfillment,
+        }
     if args.command == "bundle":
         if args.bundle_command in {"validate", "inspect"}:
             inspected = inspect_bundle(args.bundle)
