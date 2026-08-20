@@ -134,6 +134,19 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class CliTest(unittest.TestCase):
+    def test_operation_lint_names_supporting_simulators_without_capability_declarations(self):
+        from miniverse_sdk.onnx_metadata import compatibility_report
+
+        report = compatibility_report({
+            "backends": [{"id": "isaac-sim"}],
+            "inputs": [{"name": "obs", "slices": [{"provider": "contacts", "component": "normalForce"}]}],
+        })
+        row = report["inputs"]["obs"][0]
+        self.assertEqual(row["operation"], "contacts.normalForce")
+        self.assertEqual(row["supportedSimulators"], ["mujoco-cpu"])
+        self.assertEqual(row["isaac-sim"], "unsupported")
+        self.assertEqual(report["incompatible"], ["obs:contacts.normalForce@isaac-sim"])
+
     def test_validate_and_agent_help(self):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(Path(directory) / "fixture.dhsim")

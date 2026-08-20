@@ -29,9 +29,10 @@ graph bytes by hand.
   `sampleOffsets` over any provider source), not from hand-rolled buffers.
 - Actuator-target outputs are physical values: v0.3 has no output
   `scale`/`offset`. Bake PD scaling and decoding into the graph.
-- `miniverse model validate` also prints a per-input provider fulfillment
-  matrix against each simulator profile; fix `unfulfillable` rows before
-  uploading.
+- `miniverse model validate` also lints exact per-input operations against each
+  simulator profile. Fix `unsupported` rows before uploading. This is a lint,
+  not a `requiredCapabilities` declaration or runtime negotiation mechanism;
+  runtime failures repeat the selected and supporting backends descriptively.
 
 ## TensorRT compatibility rules
 

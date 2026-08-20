@@ -11,31 +11,13 @@ ONNX_SCHEMA_VERSION = "0.3"
 SUPPORTED_PRECISIONS = ("fp32", "fp16", "bf16")
 MAX_METADATA_ENTRY_BYTES = 512 * 1024
 
-# Static per-simulator observation capability table, mirrored from the runtime
-# engine adapters. "conditional" providers depend on a runtime probe (Isaac
-# contact/scene-query frontends) and are verified again at session start.
-SHARED_PROVIDERS = ("command", "previousAction", "simTime", "constant", "history", "deterministicRandom")
-SIMULATOR_PROVIDERS: dict[str, dict[str, str]] = {
-    "mujoco": {
-        **{provider: "fulfilled" for provider in SHARED_PROVIDERS},
-        **{provider: "fulfilled" for provider in (
-            "jointPosition", "jointVelocity", "jointEffort", "bodyPose", "bodyLinearVelocity",
-            "bodyAngularVelocity", "projectedGravity", "contacts", "surfaceQuery",
-        )},
-    },
-    "isaac-sim": {
-        **{provider: "fulfilled" for provider in SHARED_PROVIDERS},
-        **{provider: "fulfilled" for provider in (
-            "jointPosition", "jointVelocity", "jointEffort", "bodyPose", "bodyLinearVelocity",
-            "bodyAngularVelocity", "projectedGravity",
-        )},
-        "contacts": "conditional",
-        "surfaceQuery": "conditional",
-    },
+SIMULATORS = ("mujoco-cpu", "isaac-sim", "isaac-sim-gpu-physx")
+CONTACT_SUPPORT = {
+    "netForce": SIMULATORS,
+    "impulse": SIMULATORS,
+    "normalForce": ("mujoco-cpu",),
+    "pairCount": ("mujoco-cpu",),
 }
-SIMULATOR_PROVIDERS["isaac-sim-gpu-physx"] = dict(SIMULATOR_PROVIDERS["isaac-sim"])
-# Isaac's tensor frontend only exposes net link contact forces.
-ISAAC_CONTACT_COMPONENTS = ("netForce", "impulse")
 
 
 class OnnxMetadataError(ValueError):
@@ -156,16 +138,12 @@ def validate_contract(metadata: dict[str, str]) -> str:
     return str(parse_contract(metadata)["precision"])
 
 
-def fulfillment_report(contract: dict) -> dict:
-    """Per-input provider fulfillment against each simulator's capability set.
-
-    Authoring-time preview of the session-composition check: every slice's
-    provider is resolved against the static capability table so an author sees
-    an unservable observation before uploading, not at session start.
-    """
+def compatibility_report(contract: dict) -> dict:
+    """Lint exact operations without adding bundle capability declarations."""
+    selected = {str(value.get("id")) for value in contract.get("backends", ()) if isinstance(value, dict)}
     state_inputs = {str(value.get("inputName", "")) for value in contract.get("stateBindings", []) if isinstance(value, dict)}
     report: dict[str, list[dict]] = {}
-    unfulfillable: list[str] = []
+    incompatible: list[str] = []
     entries = [
         *(({"input": str(item.get("name", "")), "slices": item.get("slices", [])},) for item in contract.get("inputs", []) if isinstance(item, dict) and str(item.get("name", "")) not in state_inputs),
         *(({"input": f"historyBuffer:{item.get('id')}", "slices": [item.get("source", {})]},) for item in contract.get("historyBuffers", []) if isinstance(item, dict)),
@@ -177,18 +155,22 @@ def fulfillment_report(contract: dict) -> dict:
                 continue
             provider = str(value.get("provider", ""))
             component = value.get("component")
-            row: dict = {"provider": provider}
+            operation = f"contacts.{component}" if provider == "contacts" else f"surfaceQuery.{value.get('kind')}" if provider == "surfaceQuery" else f"observations.{provider}"
+            row: dict = {"provider": provider, "operation": operation}
             if component:
                 row["component"] = str(component)
-            for simulator, table in SIMULATOR_PROVIDERS.items():
-                status = table.get(provider, "unfulfillable")
-                if provider == "history":
-                    status = "fulfilled"
-                if provider == "contacts" and simulator.startswith("isaac") and component and str(component) not in ISAAC_CONTACT_COMPONENTS:
-                    status = "unfulfillable"
+            supporting = CONTACT_SUPPORT.get(str(component), ()) if provider == "contacts" else SIMULATORS
+            row["supportedSimulators"] = list(supporting)
+            for simulator in SIMULATORS:
+                status = "supported" if simulator in supporting else "unsupported"
                 row[simulator] = status
-                if status == "unfulfillable":
-                    unfulfillable.append(f"{entry['input']}:{provider}@{simulator}")
+                if status == "unsupported" and simulator in selected:
+                    incompatible.append(f"{entry['input']}:{operation}@{simulator}")
             rows.append(row)
         report[entry["input"]] = rows
-    return {"inputs": report, "unfulfillable": sorted(set(unfulfillable))}
+    return {"declaredSimulators": sorted(selected), "inputs": report, "incompatible": sorted(set(incompatible))}
+
+
+def fulfillment_report(contract: dict) -> dict:
+    """Compatibility alias for older SDK callers; no capability negotiation occurs."""
+    return compatibility_report(contract)
