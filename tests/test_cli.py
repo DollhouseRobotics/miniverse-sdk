@@ -80,6 +80,7 @@ def fixture(path: Path, model: bytes | None = None) -> Path:
     manifest = {
         "version": "dhr.simulation-bundle/v1", "id": "fixture", "name": "Fixture",
         "primarySimulator": "mujoco", "primaryModel": "policy",
+        "policyBindings": {"source": "embedded-model-contract", "modelId": "policy"},
         "scene": {"sha256": digest(scene)},
         "models": [{"id": "policy", "sha256": digest(model)}],
         "program": {"sourceSha256": digest(program)},

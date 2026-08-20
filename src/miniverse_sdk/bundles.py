@@ -173,8 +173,14 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
                 raise BundleValidationError("invalid_manifest", f"duplicate model id {model_id!r}")
             model_ids.add(model_id)
             expected[f"models/{model_id}.onnx"] = ("model", _hash(model.get("sha256"), f"model {model_id} sha256"))
-        if manifest.get("primaryModel") not in model_ids:
+        primary_model = manifest.get("primaryModel")
+        if primary_model not in model_ids:
             raise BundleValidationError("invalid_manifest", "primaryModel must name a declared model")
+        policy_bindings = _object(manifest.get("policyBindings"), "policyBindings")
+        if policy_bindings.get("source") not in {"embedded-model-contract", "sim-data-controller"}:
+            raise BundleValidationError("invalid_manifest", "policyBindings.source must be embedded-model-contract or sim-data-controller")
+        if policy_bindings.get("modelId") != primary_model:
+            raise BundleValidationError("invalid_manifest", "policyBindings.modelId must name primaryModel")
         for kind, archive_name, manifest_key in (("robot", "robot/mjcf.zip", "robot"), ("visual", "visual/robot.glb", "visual")):
             if manifest.get(manifest_key) is not None:
                 asset = _object(manifest[manifest_key], manifest_key)
