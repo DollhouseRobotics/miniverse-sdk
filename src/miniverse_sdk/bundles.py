@@ -150,6 +150,8 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
             raise BundleValidationError("invalid_manifest", "bundle.json must be valid UTF-8 JSON") from error
         manifest = _object(manifest, "bundle manifest")
+        if "policyBindings" in manifest:
+            raise BundleValidationError("invalid_manifest", "policyBindings was removed; bundle controllers always construct model inputs from SimData")
         bundle_id = _string(manifest.get("id"), "bundle id", 128)
         name = _string(manifest.get("name", bundle_id), "bundle name", 160)
         simulator = _string(manifest.get("primarySimulator"), "primarySimulator", 32)
@@ -176,11 +178,6 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         primary_model = manifest.get("primaryModel")
         if primary_model not in model_ids:
             raise BundleValidationError("invalid_manifest", "primaryModel must name a declared model")
-        policy_bindings = _object(manifest.get("policyBindings"), "policyBindings")
-        if policy_bindings.get("source") not in {"embedded-model-contract", "sim-data-controller"}:
-            raise BundleValidationError("invalid_manifest", "policyBindings.source must be embedded-model-contract or sim-data-controller")
-        if policy_bindings.get("modelId") != primary_model:
-            raise BundleValidationError("invalid_manifest", "policyBindings.modelId must name primaryModel")
         for kind, archive_name, manifest_key in (("robot", "robot/mjcf.zip", "robot"), ("visual", "visual/robot.glb", "visual")):
             if manifest.get(manifest_key) is not None:
                 asset = _object(manifest[manifest_key], manifest_key)

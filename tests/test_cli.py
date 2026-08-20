@@ -72,7 +72,7 @@ def model_with_precision(precision: str = "fp16", graph: bytes | None = None, op
     ))
 
 
-def fixture(path: Path, model: bytes | None = None) -> Path:
+def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: bool = False) -> Path:
     program = b"class Policy:\n    pass\n"
     scene = b"glb-scene"
     model = model_with_precision() if model is None else model
@@ -80,11 +80,12 @@ def fixture(path: Path, model: bytes | None = None) -> Path:
     manifest = {
         "version": "dhr.simulation-bundle/v1", "id": "fixture", "name": "Fixture",
         "primarySimulator": "mujoco", "primaryModel": "policy",
-        "policyBindings": {"source": "embedded-model-contract", "modelId": "policy"},
         "scene": {"sha256": digest(scene)},
         "models": [{"id": "policy", "sha256": digest(model)}],
         "program": {"sourceSha256": digest(program)},
     }
+    if legacy_policy_bindings:
+        manifest["policyBindings"] = {"source": "embedded-model-contract", "modelId": "policy"}
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("bundle.json", json.dumps(manifest))
         archive.writestr("policy.py", program)
@@ -157,6 +158,12 @@ class CliTest(unittest.TestCase):
             self.assertEqual(inspected.model_precisions, {"policy": "fp16"})
         self.assertIn("MINIVERSE_API_TOKEN", agent_help("auth", False))
         self.assertIn("server verifies and expands", agent_help("upload", False))
+
+    def test_bundle_rejects_removed_policy_bindings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "legacy.dhsim", legacy_policy_bindings=True)
+            with self.assertRaisesRegex(BundleValidationError, "policyBindings was removed"):
+                inspect_bundle(path)
 
     def test_tensorrt_compat_findings(self):
         from io import BytesIO
