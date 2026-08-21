@@ -36,16 +36,12 @@ graph bytes by hand.
 
 ## TensorRT compatibility rules
 
-**No full-axis sorts.** `torch.sort` / full-vocabulary `torch.topk` lower to
-ONNX `TopK` with K equal to the axis length, and TensorRT rejects `TopK` with
-K > 3,840. Capping K changes sampling behavior — usually unacceptably. Top-p
-(nucleus) sampling never needed the sort: nucleus membership is a probability
-threshold, findable by a fixed-iteration bisection of elementwise compares and
-reductions, and inverse-CDF sampling draws the identical distribution in plain
-vocabulary order (the rank is the token id — no sorted indices, no Gather).
-When bisecting, compare kept tokens against the bracket's LOW edge: the true
-threshold equals the boundary token's own probability and the high edge
-converges to it from above, so comparing high drops that token.
+**No full-axis sorts.** `torch.sort` and full-vocabulary `torch.topk` lower to
+ONNX `TopK` with K equal to the axis length, which TensorRT cannot compile.
+Restructure the math instead: prefer fixed-iteration, data-independent
+formulations (for example threshold-based selection built from elementwise
+compares and reductions) that preserve the checkpoint's output distribution.
+Do not simply cap K when doing so changes policy behavior.
 
 **Keep every `TopK` K a graph constant.** Shape-derived or otherwise dynamic
 K cannot be verified at build time and fails compilation.
@@ -61,6 +57,13 @@ construction.
 
 **No data-dependent control flow.** Unroll loops to a fixed iteration count at
 export; avoid `If`/`Loop`/`Scan` nodes.
+
+**Do not change floating-point precision to gain compatibility.** Export the
+exact dtypes of the source checkpoint. Never recast weights, activations, or
+accumulations to lower or mixed precision merely to satisfy a compiler finding;
+if a checkpoint only compiles after altering precision, treat it as
+incompatible and report the finding to the user instead of uploading the
+modified graph.
 
 **Avoid known PyTorch export traps:**
 
