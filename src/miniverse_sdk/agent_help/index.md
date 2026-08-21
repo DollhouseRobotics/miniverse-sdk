@@ -1,9 +1,7 @@
 # Miniverse agent guide
 
-You are using `miniverse-sdk` 0.1.0. Miniverse is Dollhouse Robotics' standalone
-simulation product. It owns immutable `.dhsim` bundles, browser sessions,
-Cloudflare lifecycle control, Modal preprocessing, and the universal Vast fleet.
-Do not introduce an Optics dependency.
+You are using `miniverse-sdk` 0.1.0. Miniverse is Dollhouse Robotics'
+cloud-based robotics physics simulation platform.
 
 Start with:
 

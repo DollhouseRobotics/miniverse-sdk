@@ -1,12 +1,11 @@
 # Bundle validation
 
 A `.dhsim` archive contains exactly `bundle.json`, `policy.py`, mandatory
-`embodiment/mjcf.zip`, and one or more `models/<id>.onnx` files. Miniverse
-derives SHA-256 and byte identities from those included files. Do not put
-hashes, a `scene`, `seed`, `robot`, `visual`, `primaryModel`, model providers,
+`embodiment/mjcf.zip`, and one or more `models/<id>.onnx` files. Do not put a
+`scene`, `seed`, `robot`, `visual`, `primaryModel`, model providers,
 or model loading policy in `bundle.json`.
 
-The environment is `builtin/flat-ground-v1`. The Python controller declares
+The Python controller declares
 its physics/policy/publication timing, owns randomness, sees all models through
 `context.models`, constructs all inputs from `PolicyStep.sim_data`, and returns
 physical actuation in canonical MJCF actuator order. Optional `metadata` is a
@@ -15,23 +14,19 @@ freeform JSON object and has no execution semantics.
 For a policy-specific spawn/reset, define `initial_state()` on the controller
 and return `ControllerInitialState` with the canonical root body ID, a
 world-frame position, and an XYZW unit quaternion. Do not put reset state in
-`bundle.json`; without the hook Miniverse uses the MJCF's compiled `qpos0`.
-Miniverse also derives the renderer-only visual GLB from the included MJCF and
-`embodiment.appearance.geometry`; do not include or hash visual bytes yourself.
-MJCF geoms may be both visible and collision-active. With `geometry: "auto"`,
-Miniverse prefers dedicated non-colliding visual geoms when present, otherwise
-renders the MJCF's collision-active geoms, and uses the inertial shell only
-when the model contains no renderable geoms. Authors can add physics-neutral
-custom visuals with `contype="0" conaffinity="0" mass="0"` without changing
-the bundle schema or simulation dynamics. Author visual `pos`, `quat`, and
-`fromto` values in the MJCF source frame; the viewer preserves those body-local
-transforms and applies the embodiment's complete source-to-glTF basis.
+`bundle.json`; without the hook Miniverse uses the MJCF's compiled default pose.
+Miniverse also derives rendering-only visuals from the included MJCF and
+`embodiment.appearance.geometry`; do not include visual bytes yourself.
+MJCF geoms may be both visible and collision-active. Authors can add
+physics-neutral custom visuals with `contype="0" conaffinity="0" mass="0"`
+without changing the bundle schema or simulation dynamics. Author visual `pos`,
+`quat`, and `fromto` values in the MJCF source frame.
 
 Author actuator gains, control/force ranges, and Miniverse's namespaced
 actuator velocity-limit numeric directly in `embodiment/mjcf.zip`. Use
 `embodiment.bodyDynamicsOverrides` only for exact named-body linear/angular
-damping and maximum linear/angular velocity. Those per-body fields run on the
-two Isaac PhysX profiles and produce a descriptive runtime error on MuJoCo.
+damping and maximum linear/angular velocity. Unsupported backends produce a
+descriptive runtime error.
 
 Each ONNX checkpoint must be self-contained and embed all Miniverse policy
 metadata in
@@ -50,8 +45,8 @@ precision values are rejected. Exporters using
 
 Run `miniverse bundle validate PATH.dhsim --json` before upload. Treat local
 validation as feedback; its `model_precisions` result reports the discovered
-precision for each model, and the server-side importer is authoritative. Do not alter
-a bundle after recording its archive hash. Preserve simulator profile, model,
+precision for each model, and the server-side importer is authoritative. Treat
+an uploaded bundle as immutable. Preserve simulator profile, model,
 embodiment, coordinate-frame, and actuator-order identities.
 
 Validation also statically scans each ONNX graph for TensorRT builder limits
