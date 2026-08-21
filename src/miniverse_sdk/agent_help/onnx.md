@@ -50,6 +50,15 @@ converges to it from above, so comparing high drops that token.
 **Keep every `TopK` K a graph constant.** Shape-derived or otherwise dynamic
 K cannot be verified at build time and fails compilation.
 
+**Declare `precision: "fp16"` only when the whole graph tolerates it.** The
+compilers convert every float tensor, not just the network weights. An fp16
+cumulative distribution resolves ~5e-4 absolute, so an in-graph sampler over a
+large vocabulary cannot draw tokens below that probability and their mass
+shifts onto neighbours — a silent behavior change that ONNX Runtime (which
+executes the declared fp32 graph) never shows. Declare `fp32` for
+sampler-bearing graphs unless the CDF is kept in full precision by
+construction.
+
 **No data-dependent control flow.** Unroll loops to a fixed iteration count at
 export; avoid `If`/`Loop`/`Scan` nodes.
 
