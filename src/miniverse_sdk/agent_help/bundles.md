@@ -23,7 +23,9 @@ Miniverse prefers dedicated non-colliding visual geoms when present, otherwise
 renders the MJCF's collision-active geoms, and uses the inertial shell only
 when the model contains no renderable geoms. Authors can add physics-neutral
 custom visuals with `contype="0" conaffinity="0" mass="0"` without changing
-the bundle schema or simulation dynamics.
+the bundle schema or simulation dynamics. Author visual `pos`, `quat`, and
+`fromto` values in the MJCF source frame; the viewer preserves those body-local
+transforms and applies the embodiment's complete source-to-glTF basis.
 
 Use `embodiment.dynamicsOverrides` for actuator values. Use
 `embodiment.bodyDynamicsOverrides` for exact named-body linear/angular damping
