@@ -199,8 +199,10 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         if not isinstance(compatible, list) or any(value not in SIMULATORS or value == simulator for value in compatible) or len(set(compatible)) != len(compatible):
             raise BundleValidationError("invalid_manifest", "compatibleSimulators must contain distinct supported non-primary simulators")
         embodiment = _object(manifest.get("embodiment"), "embodiment")
-        if set(embodiment) - {"appearance", "dynamicsOverrides", "bodyDynamicsOverrides"}:
-            raise BundleValidationError("invalid_manifest", "embodiment accepts appearance, dynamicsOverrides, and bodyDynamicsOverrides; its MJCF is supplied by embodiment/mjcf.zip")
+        if "dynamicsOverrides" in embodiment:
+            raise BundleValidationError("invalid_manifest", "embodiment.dynamicsOverrides was removed; author actuator gains and limits in embodiment/mjcf.zip")
+        if set(embodiment) - {"appearance", "bodyDynamicsOverrides"}:
+            raise BundleValidationError("invalid_manifest", "embodiment accepts appearance and bodyDynamicsOverrides; its MJCF is supplied by embodiment/mjcf.zip")
         _validate_body_dynamics_overrides(embodiment.get("bodyDynamicsOverrides"))
         program = _object(manifest.get("program"), "program")
         if set(program) != {"apiVersion", "entrypoint"} or program.get("apiVersion") != "dhr.python-policy/v1":

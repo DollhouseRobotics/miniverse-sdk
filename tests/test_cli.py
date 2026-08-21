@@ -72,7 +72,7 @@ def model_with_precision(precision: str = "fp16", graph: bytes | None = None, op
     ))
 
 
-def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: bool = False) -> Path:
+def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: bool = False, legacy_dynamics_overrides: bool = False) -> Path:
     program = b"class Policy:\n    pass\n"
     embodiment = b"mjcf-archive"
     model = model_with_precision() if model is None else model
@@ -83,6 +83,8 @@ def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: b
     }
     if legacy_policy_bindings:
         manifest["policyBindings"] = {"source": "embedded-model-contract", "modelId": "policy"}
+    if legacy_dynamics_overrides:
+        manifest["embodiment"]["dynamicsOverrides"] = []
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("bundle.json", json.dumps(manifest))
         archive.writestr("policy.py", program)
@@ -160,6 +162,12 @@ class CliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(Path(directory) / "legacy.dhsim", legacy_policy_bindings=True)
             with self.assertRaisesRegex(BundleValidationError, "fields were removed: policyBindings"):
+                inspect_bundle(path)
+
+    def test_bundle_rejects_removed_actuator_dynamics_overrides(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "legacy.dhsim", legacy_dynamics_overrides=True)
+            with self.assertRaisesRegex(BundleValidationError, "dynamicsOverrides was removed; author actuator gains and limits"):
                 inspect_bundle(path)
 
     def test_tensorrt_compat_findings(self):

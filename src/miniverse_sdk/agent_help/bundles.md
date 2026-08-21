@@ -27,10 +27,11 @@ the bundle schema or simulation dynamics. Author visual `pos`, `quat`, and
 `fromto` values in the MJCF source frame; the viewer preserves those body-local
 transforms and applies the embodiment's complete source-to-glTF basis.
 
-Use `embodiment.dynamicsOverrides` for actuator values. Use
-`embodiment.bodyDynamicsOverrides` for exact named-body linear/angular damping
-and maximum linear/angular velocity. Those per-body fields run on the two
-Isaac PhysX profiles and produce a descriptive runtime error on MuJoCo.
+Author actuator gains, control/force ranges, and Miniverse's namespaced
+actuator velocity-limit numeric directly in `embodiment/mjcf.zip`. Use
+`embodiment.bodyDynamicsOverrides` only for exact named-body linear/angular
+damping and maximum linear/angular velocity. Those per-body fields run on the
+two Isaac PhysX profiles and produce a descriptive runtime error on MuJoCo.
 
 Each ONNX checkpoint must be self-contained and embed all Miniverse policy
 metadata in
