@@ -12,6 +12,13 @@ its physics/policy/publication timing, owns randomness, sees all models through
 physical actuation in canonical MJCF actuator order. Optional `metadata` is a
 freeform JSON object and has no execution semantics.
 
+For a policy-specific spawn/reset, define `initial_state()` on the controller
+and return `ControllerInitialState` with the canonical root body ID, a
+world-frame position, and an XYZW unit quaternion. Do not put reset state in
+`bundle.json`; without the hook Miniverse uses the MJCF's compiled `qpos0`.
+Miniverse also derives the renderer-only visual GLB from the included MJCF and
+`embodiment.appearance.geometry`; do not include or hash visual bytes yourself.
+
 Use `embodiment.dynamicsOverrides` for actuator values. Use
 `embodiment.bodyDynamicsOverrides` for exact named-body linear/angular damping
 and maximum linear/angular velocity. Those per-body fields run on the two
