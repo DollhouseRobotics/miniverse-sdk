@@ -18,6 +18,12 @@ world-frame position, and an XYZW unit quaternion. Do not put reset state in
 `bundle.json`; without the hook Miniverse uses the MJCF's compiled `qpos0`.
 Miniverse also derives the renderer-only visual GLB from the included MJCF and
 `embodiment.appearance.geometry`; do not include or hash visual bytes yourself.
+MJCF geoms may be both visible and collision-active. With `geometry: "auto"`,
+Miniverse prefers dedicated non-colliding visual geoms when present, otherwise
+renders the MJCF's collision-active geoms, and uses the inertial shell only
+when the model contains no renderable geoms. Authors can add physics-neutral
+custom visuals with `contype="0" conaffinity="0" mass="0"` without changing
+the bundle schema or simulation dynamics.
 
 Use `embodiment.dynamicsOverrides` for actuator values. Use
 `embodiment.bodyDynamicsOverrides` for exact named-body linear/angular damping
