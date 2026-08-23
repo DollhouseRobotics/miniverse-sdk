@@ -16,7 +16,7 @@ from unittest.mock import patch
 from miniverse_sdk.bundles import BundleValidationError, inspect_bundle
 from miniverse_sdk.api import Client
 from miniverse_sdk.cli import agent_help, main
-from miniverse_sdk.config import OAuthCredential, credential, load_oauth_credential, save_oauth_credential
+from miniverse_sdk.config import OAuthCredential, credential, delete_oauth_credential, load_oauth_credential, save_oauth_credential
 
 
 def _varint(value: int) -> bytes:
@@ -302,7 +302,7 @@ class CliTest(unittest.TestCase):
                 thread.join()
                 server.server_close()
 
-    def test_legacy_keyring_token_moves_to_the_default_file(self):
+    def test_file_store_does_not_read_legacy_keyring_tokens(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "auth.json"
             with patch.dict(os.environ, {
@@ -310,13 +310,11 @@ class CliTest(unittest.TestCase):
                 "MINIVERSE_AUTH_STORE": "file",
                 "MINIVERSE_API_TOKEN": "",
             }, clear=False), patch("miniverse_sdk.config._keyring_get", return_value="legacy-access") as get_keyring, patch("miniverse_sdk.config._keyring_delete") as delete_keyring:
-                migrated = load_oauth_credential("https://miniverse.bot")
-                self.assertIsNotNone(migrated)
-                self.assertEqual(migrated.access_token, "legacy-access")
-                self.assertFalse(migrated.renewable)
-                self.assertTrue(path.is_file())
-                get_keyring.assert_called_once_with("oauth-access-token")
-                delete_keyring.assert_called_once_with("oauth-access-token")
+                self.assertIsNone(load_oauth_credential("https://miniverse.bot"))
+                delete_oauth_credential("https://miniverse.bot")
+                self.assertFalse(path.exists())
+                get_keyring.assert_not_called()
+                delete_keyring.assert_not_called()
 
     def test_rejects_undeclared_and_traversal_members(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -20,6 +20,9 @@ On Linux the default is `$XDG_STATE_HOME/miniverse/auth.json`, or
 `MINIVERSE_HOME` to put `auth.json` in a different persistent directory. An
 ephemeral agent or container must mount that directory across runs.
 
+The renewable credential format is a hard cutover. A pre-0.2 keyring login is
+not read, copied, or deleted; run `miniverse auth login` once after upgrading.
+
 Inspect only non-secret metadata with `miniverse auth status`; remove and revoke
 the OAuth credential with `miniverse auth logout`. To opt back into an available
 desktop credential service, set `MINIVERSE_AUTH_STORE=keyring`.

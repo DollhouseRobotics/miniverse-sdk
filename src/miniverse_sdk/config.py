@@ -13,7 +13,6 @@ from typing import Iterator
 
 DEFAULT_ORIGIN = "https://miniverse.bot"
 SERVICE = "miniverse-sdk"
-LEGACY_ACCOUNT = "oauth-access-token"
 AUTH_VERSION = 1
 
 
@@ -182,18 +181,7 @@ def load_oauth_credential(api_origin: str | None = None) -> OAuthCredential | No
                 return None
         return None
     stored_origins = _read_file()["origins"]
-    credential = _decode_credential(stored_origins.get(target), target) if isinstance(stored_origins, dict) else None
-    if credential:
-        return credential
-    # One-way migration for the pre-0.2 keyring entry. The old access token is
-    # retained as a non-renewable credential until the user signs in once.
-    legacy = _keyring_get(LEGACY_ACCOUNT) if target == DEFAULT_ORIGIN else None
-    if legacy:
-        migrated = OAuthCredential(access_token=legacy, origin=target)
-        save_oauth_credential(migrated)
-        _keyring_delete(LEGACY_ACCOUNT)
-        return migrated
-    return None
+    return _decode_credential(stored_origins.get(target), target) if isinstance(stored_origins, dict) else None
 
 
 def delete_oauth_credential(api_origin: str | None = None) -> None:
@@ -205,7 +193,6 @@ def delete_oauth_credential(api_origin: str | None = None) -> None:
         origins = dict(value["origins"])  # type: ignore[arg-type]
         if origins.pop(target, None) is not None:
             _write_file({"version": AUTH_VERSION, "origins": origins})
-    _keyring_delete(LEGACY_ACCOUNT)
 
 
 @contextmanager
