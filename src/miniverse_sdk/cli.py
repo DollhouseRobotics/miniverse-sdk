@@ -18,7 +18,7 @@ from dataclasses import asdict
 from . import __version__
 from .api import ApiError, Client
 from .bundles import BundleValidationError, inspect_bundle
-from .config import credential, delete_oauth_token, origin, save_oauth_token
+from .config import OAuthCredential, auth_file, auth_store, credential, delete_oauth_credential, origin, save_oauth_credential
 from .onnx_compat import CompatFinding, scan_model
 from .onnx_metadata import OnnxMetadataError
 
@@ -42,8 +42,13 @@ def agent_help(topic: str | None, all_topics: bool) -> str:
 
 
 def auth_login(args: argparse.Namespace) -> dict[str, Any]:
-    client = Client(origin(args.origin), None)
-    created = client.request("/api/auth/device/code", {"client_id": "miniverse-cli", "scope": "openid profile email bundles:read bundles:upload bundles:publish"}, authenticated=False)
+    api_origin = origin(args.origin)
+    client = Client(api_origin, None)
+    created = client.request_form("/api/auth/device/code", {
+        "client_id": "miniverse-cli",
+        "scope": "openid profile email offline_access bundles:read bundles:upload bundles:publish",
+        "resource": api_origin,
+    })
     verification = str(created.get("verification_uri_complete") or created.get("verification_uri") or "")
     device_code = str(created.get("device_code") or "")
     if not verification or not device_code:
@@ -56,7 +61,11 @@ def auth_login(args: argparse.Namespace) -> dict[str, Any]:
     while time.monotonic() < deadline:
         time.sleep(interval)
         try:
-            value = client.request("/api/auth/device/token", {"grant_type": "urn:ietf:params:oauth:grant-type:device_code", "device_code": device_code, "client_id": "miniverse-cli"}, authenticated=False)
+            value = client.request_form("/api/auth/oauth2/token", {
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device_code,
+                "client_id": "miniverse-cli",
+            })
         except ApiError as error:
             if error.code == "authorization_pending":
                 continue
@@ -66,15 +75,27 @@ def auth_login(args: argparse.Namespace) -> dict[str, Any]:
             raise
         token = value.get("access_token")
         if isinstance(token, str) and token:
-            storage = save_oauth_token(token)
-            return {"authenticated": True, "source": "oauth", "storage": storage}
+            refresh_token = value.get("refresh_token")
+            expires_in = value.get("expires_in")
+            saved = OAuthCredential(
+                access_token=token,
+                refresh_token=refresh_token if isinstance(refresh_token, str) and refresh_token else None,
+                expires_at=time.time() + float(expires_in) if isinstance(expires_in, (int, float)) else None,
+                scope=value.get("scope") if isinstance(value.get("scope"), str) else None,
+                origin=api_origin,
+            )
+            if not saved.renewable:
+                raise ApiError(502, "authorization server did not issue a refresh token", "oauth_contract_error")
+            storage = save_oauth_credential(saved)
+            return {"authenticated": True, "source": "oauth", "storage": storage, "renewable": True}
     raise ApiError(408, "device authorization expired", "expired_token")
 
 
 def bundle_upload(args: argparse.Namespace) -> dict[str, Any]:
     inspected = inspect_bundle(args.bundle)
-    token, source = credential()
-    client = Client(origin(args.origin), token)
+    api_origin = origin(args.origin)
+    saved, source = credential(api_origin)
+    client = Client(api_origin, saved)
     prepared = client.request("/api/v1/bundle-imports", {
         "archiveSha256": inspected.archive_sha256,
         "bytes": inspected.archive_bytes,
@@ -164,10 +185,31 @@ def run(args: argparse.Namespace) -> Any:
         if args.auth_command == "login":
             return auth_login(args)
         if args.auth_command == "logout":
-            delete_oauth_token()
+            api_origin = origin(args.origin)
+            saved, _ = credential(api_origin)
+            if isinstance(saved, OAuthCredential) and saved.refresh_token:
+                try:
+                    Client(api_origin, None).request_form("/api/auth/oauth2/revoke", {
+                        "token": saved.refresh_token,
+                        "token_type_hint": "refresh_token",
+                        "client_id": saved.client_id,
+                    })
+                except ApiError:
+                    pass
+            delete_oauth_credential(api_origin)
             return {"authenticated": False, "source": "none"}
-        token, source = credential()
-        return {"authenticated": bool(token), "source": source}
+        api_origin = origin(args.origin)
+        saved, source = credential(api_origin)
+        return {
+            "authenticated": bool(saved),
+            "source": source,
+            **({
+                "storage": auth_store(),
+                "renewable": isinstance(saved, OAuthCredential) and saved.renewable,
+                "expiresAt": saved.expires_at if isinstance(saved, OAuthCredential) else None,
+                **({"path": str(auth_file())} if auth_store() == "file" else {}),
+            } if saved and source == "oauth" else {}),
+        }
     if args.command == "model":
         path = Path(args.model)
         if not path.is_file():
@@ -194,8 +236,9 @@ def run(args: argparse.Namespace) -> Any:
             if getattr(args, "strict", False) and inspected.model_findings:
                 raise _strict_failure(inspected.model_findings)
             return {"ok": True, **inspected.as_dict(include_manifest=args.bundle_command == "inspect")}
-        token, _ = credential()
-        client = Client(origin(args.origin), token)
+        api_origin = origin(args.origin)
+        saved, _ = credential(api_origin)
+        client = Client(api_origin, saved)
         if args.bundle_command == "upload":
             return bundle_upload(args)
         if args.bundle_command == "status":

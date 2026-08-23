@@ -1,6 +1,6 @@
 # Miniverse agent guide
 
-You are using `miniverse-sdk` 0.1.0. Miniverse is Dollhouse Robotics'
+You are using `miniverse-sdk` 0.2.0. Miniverse is Dollhouse Robotics'
 cloud-based robotics physics simulation platform.
 
 Start with:
@@ -10,8 +10,9 @@ miniverse version --json
 miniverse auth status --json
 miniverse bundle validate PATH.dhsim --json
 ```
-Use `MINIVERSE_API_TOKEN` for automation or `miniverse auth login` for an
-interactive device flow. Never print credentials or signed transfer URLs.
+Use `miniverse auth login` once for a persistent agent workspace; the CLI
+refreshes that grant automatically. Use `MINIVERSE_API_TOKEN` for CI. Never
+print credentials or signed transfer URLs.
 
 Read the relevant topic before acting:
 

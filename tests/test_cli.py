@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import struct
 import tempfile
 import threading
@@ -13,8 +14,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from miniverse_sdk.bundles import BundleValidationError, inspect_bundle
+from miniverse_sdk.api import Client
 from miniverse_sdk.cli import agent_help, main
-from miniverse_sdk.config import credential
+from miniverse_sdk.config import OAuthCredential, credential, load_oauth_credential, save_oauth_credential
 
 
 def _varint(value: int) -> bytes:
@@ -134,6 +136,40 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
 
+class RefreshHandler(BaseHTTPRequestHandler):
+    refreshes = 0
+
+    def log_message(self, *_args):
+        pass
+
+    def _json(self, value, status=200):
+        body = json.dumps(value).encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        length = int(self.headers.get("content-length", "0"))
+        form = dict(item.split("=", 1) for item in self.rfile.read(length).decode().split("&"))
+        if self.path != "/api/auth/oauth2/token" or form.get("grant_type") != "refresh_token":
+            return self._json({"error": "not found"}, 404)
+        RefreshHandler.refreshes += 1
+        return self._json({
+            "access_token": "access-2",
+            "refresh_token": "refresh-2",
+            "expires_in": 3600,
+            "scope": "offline_access bundles:upload",
+        })
+
+    def do_GET(self):
+        if self.path != "/protected":
+            return self._json({"error": "not found"}, 404)
+        if self.headers.get("authorization") != "Bearer access-2":
+            return self._json({"error": "expired", "code": "access_required"}, 401)
+        return self._json({"ok": True})
+
 class CliTest(unittest.TestCase):
     def test_operation_lint_names_supporting_simulators_without_capability_declarations(self):
         from miniverse_sdk.onnx_metadata import compatibility_report
@@ -232,6 +268,55 @@ class CliTest(unittest.TestCase):
     def test_environment_token_is_the_noninteractive_auth_contract(self):
         with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "environment-token"}, clear=False):
             self.assertEqual(credential(), ("environment-token", "MINIVERSE_API_TOKEN"))
+
+    def test_oauth_file_is_private_and_refresh_rotation_is_persisted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state" / "auth.json"
+            server = ThreadingHTTPServer(("127.0.0.1", 0), RefreshHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            api_origin = f"http://127.0.0.1:{server.server_port}"
+            RefreshHandler.refreshes = 0
+            try:
+                with patch.dict(os.environ, {
+                    "MINIVERSE_AUTH_FILE": str(path),
+                    "MINIVERSE_AUTH_STORE": "file",
+                    "MINIVERSE_API_TOKEN": "",
+                }, clear=False):
+                    saved = OAuthCredential(
+                        access_token="access-1",
+                        refresh_token="refresh-1",
+                        expires_at=None,
+                        origin=api_origin,
+                    )
+                    self.assertEqual(save_oauth_credential(saved), "file")
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                    self.assertEqual(Client(api_origin, saved).request("/protected"), {"ok": True})
+                    rotated = load_oauth_credential(api_origin)
+                    self.assertIsNotNone(rotated)
+                    self.assertEqual(rotated.access_token, "access-2")
+                    self.assertEqual(rotated.refresh_token, "refresh-2")
+                    self.assertEqual(RefreshHandler.refreshes, 1)
+            finally:
+                server.shutdown()
+                thread.join()
+                server.server_close()
+
+    def test_legacy_keyring_token_moves_to_the_default_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "auth.json"
+            with patch.dict(os.environ, {
+                "MINIVERSE_AUTH_FILE": str(path),
+                "MINIVERSE_AUTH_STORE": "file",
+                "MINIVERSE_API_TOKEN": "",
+            }, clear=False), patch("miniverse_sdk.config._keyring_get", return_value="legacy-access") as get_keyring, patch("miniverse_sdk.config._keyring_delete") as delete_keyring:
+                migrated = load_oauth_credential("https://miniverse.bot")
+                self.assertIsNotNone(migrated)
+                self.assertEqual(migrated.access_token, "legacy-access")
+                self.assertFalse(migrated.renewable)
+                self.assertTrue(path.is_file())
+                get_keyring.assert_called_once_with("oauth-access-token")
+                delete_keyring.assert_called_once_with("oauth-access-token")
 
     def test_rejects_undeclared_and_traversal_members(self):
         with tempfile.TemporaryDirectory() as directory:

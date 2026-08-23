@@ -8,5 +8,7 @@ uv tool install miniverse-sdk
 miniverse agent-help
 ```
 
-Use `MINIVERSE_API_TOKEN` for non-interactive authentication, or run
-`miniverse auth login` for interactive device authorization.
+Use `MINIVERSE_API_TOKEN` for CI authentication, or run `miniverse auth login`
+once for interactive device authorization. Interactive access and refresh
+tokens are stored in a user-only file and renewed automatically. On ephemeral
+Linux agents, persist `$XDG_STATE_HOME/miniverse` (or `~/.local/state/miniverse`).

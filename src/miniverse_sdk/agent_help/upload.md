@@ -6,8 +6,8 @@ Run:
 miniverse bundle upload PATH.dhsim --json
 ```
 
-The CLI handles the upload; Miniverse verifies the archive and returns a
-durable import record. Use `--no-wait` to detach and
+The CLI handles the upload; the server verifies and expands the archive and
+returns a durable import record. Use `--no-wait` to detach and
 `miniverse bundle status UPLOAD_ID` to resume observation.
 
 An uploaded bundle is private and ready by default. Publication is a separate,
