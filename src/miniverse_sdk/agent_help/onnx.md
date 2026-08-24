@@ -82,6 +82,7 @@ miniverse bundle validate bundle.dhsim --strict --json
 miniverse bundle upload bundle.dhsim --json
 ```
 
-`bundle validate --strict` runs the same model lint across every model in the
-archive. Warnings mean the checkpoint will import and run on the fallback but
-cannot be compiled; treat them as errors unless the fallback is intentional.
+`bundle validate` runs the same model validation across every model in the
+archive. Contract, graph, hash, tensor, or simulator errors always fail.
+Warnings mean the checkpoint will import and run on the fallback but cannot be
+compiled; `--strict` promotes those warnings to errors.

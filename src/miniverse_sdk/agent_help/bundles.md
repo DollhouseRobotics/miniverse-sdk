@@ -43,19 +43,25 @@ precision values are rejected. Exporters using
 `miniverse.contracts.embed_onnx_contract` should pass
 `{"schemaVersion": "0.3", "precision": "fp16", ...}`.
 
-Run `miniverse bundle validate PATH.dhsim --json` before upload. Treat local
-validation as feedback; its `model_precisions` result reports the discovered
-precision for each model, and the server-side importer is authoritative. Treat
-an uploaded bundle as immutable. Preserve simulator profile, model,
-embodiment, coordinate-frame, and actuator-order identities.
+Run `miniverse bundle validate PATH.dhsim --json` before upload. Local validation
+checks the archive structure, normative manifest, ONNX graph and embedded
+contract, hashes, tensor mappings, fixed batch-one shapes, simulator support,
+and statically knowable compatibility. It returns `errors`, `warnings`, and a
+per-model result. Errors always produce exit status 2. Optimization warnings
+produce exit status 0 unless `--strict` promotes them to errors. Server import
+repeats validation over the uploaded bytes and remains authoritative for
+embodiment/scene preprocessing and genuine backend execution. Treat an uploaded
+bundle as immutable and preserve simulator profile, model, embodiment,
+coordinate-frame, and actuator-order identities.
 
 Validation also statically scans each ONNX graph for TensorRT builder limits
-and reports `model_findings` (for example `tensorrt_topk_k_limit`: TopK `K`
+and reports them in `warnings` (for example `tensorrt_topk_k_limit`: TopK `K`
 must be at most 3840, and a full sort lowers to TopK over the entire axis).
-Findings do not invalidate a bundle — the ONNX Runtime fallback still executes
-it — but Miniverse cannot derive TensorRT or TensorRT-RTX artifacts until they
-are fixed, so re-export the checkpoint before uploading. Pass `--strict` to
-fail validation on any finding. To lint a checkpoint during export iteration,
+Warning findings do not invalidate a bundle — the ONNX Runtime fallback still
+executes it — but Miniverse cannot derive TensorRT or TensorRT-RTX artifacts
+until they are fixed, so re-export the checkpoint before uploading. Error
+findings always invalidate the bundle. Pass `--strict` to promote optimization
+warnings to errors. To validate a checkpoint during export iteration,
 before it is zipped into a bundle, run:
 
 ```bash

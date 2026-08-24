@@ -6,23 +6,29 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import time
 import urllib.parse
 import webbrowser
+import zipfile
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 from typing import Any
-
-from dataclasses import asdict
 
 from . import __version__
 from .api import ApiError, Client
 from .bundles import BundleValidationError, inspect_bundle
 from .config import OAuthCredential, auth_file, auth_store, credential, delete_oauth_credential, origin, save_oauth_credential
-from .onnx_compat import CompatFinding, scan_model
-from .onnx_metadata import OnnxMetadataError
+from .validation import ModelValidation, validate_bundle_model_backends, validate_model
 
 TOPICS = {"auth", "bundles", "upload", "sessions", "onnx"}
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    value: Any
+    exit_code: int = 0
 
 
 def emit(value: Any, as_json: bool = False) -> None:
@@ -92,7 +98,12 @@ def auth_login(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def bundle_upload(args: argparse.Namespace) -> dict[str, Any]:
-    inspected = inspect_bundle(args.bundle)
+    validated = validate_bundle(args.bundle)
+    if validated.exit_code:
+        error = BundleValidationError("bundle_validation", "bundle failed local validation")
+        error.details = validated.value
+        raise error
+    inspected = validated.inspection
     api_origin = origin(args.origin)
     saved, source = credential(api_origin)
     client = Client(api_origin, saved)
@@ -140,7 +151,7 @@ def parser() -> argparse.ArgumentParser:
     bundle_commands = bundle.add_subparsers(dest="bundle_command", required=True)
     validate = bundle_commands.add_parser("validate")
     validate.add_argument("bundle")
-    validate.add_argument("--strict", action="store_true", help="Fail when any model compatibility finding is present")
+    validate.add_argument("--strict", action="store_true", help="Promote optimization warnings to validation errors")
     validate.add_argument("--json", action="store_true", dest="command_json")
     inspect = bundle_commands.add_parser("inspect")
     inspect.add_argument("bundle")
@@ -153,9 +164,9 @@ def parser() -> argparse.ArgumentParser:
     upload.add_argument("--json", action="store_true", dest="command_json")
     model = commands.add_parser("model")
     model_commands = model.add_subparsers(dest="model_command", required=True)
-    model_validate = model_commands.add_parser("validate", help="Lint one ONNX checkpoint for metadata and TensorRT compatibility")
+    model_validate = model_commands.add_parser("validate", help="Validate one ONNX checkpoint and its Miniverse contract")
     model_validate.add_argument("model")
-    model_validate.add_argument("--strict", action="store_true", help="Fail when any compatibility finding is present")
+    model_validate.add_argument("--strict", action="store_true", help="Promote optimization warnings to validation errors")
     model_validate.add_argument("--json", action="store_true", dest="command_json")
     status = bundle_commands.add_parser("status")
     status.add_argument("upload_id")
@@ -168,12 +179,60 @@ def parser() -> argparse.ArgumentParser:
     return root
 
 
-def _strict_failure(model_findings: dict[str, tuple[CompatFinding, ...]]) -> BundleValidationError:
-    details = {model: [asdict(finding) for finding in findings] for model, findings in model_findings.items()}
-    total = sum(len(findings) for findings in details.values())
-    error = BundleValidationError("model_compatibility", f"strict validation found {total} model compatibility finding(s)")
-    error.details = details
-    return error
+@dataclass(frozen=True)
+class BundleCommandResult:
+    value: dict[str, Any]
+    exit_code: int
+    inspection: Any
+
+
+def _model_result(validation: ModelValidation, *, strict: bool, model_id: str | None = None) -> CommandResult:
+    errors = [issue.as_dict() for issue in validation.errors]
+    warnings = [issue.as_dict() for issue in validation.warnings]
+    if strict:
+        errors.extend({**warning, "severity": "error", "promotedByStrict": True} for warning in warnings)
+    value = {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "models": {model_id: validation.as_dict()} if model_id else {},
+    }
+    if not model_id:
+        value.update({"precision": validation.precision, "compatibility": validation.compatibility})
+    return CommandResult(value, 2 if errors else 0)
+
+
+def validate_bundle(path: str | Path, *, strict: bool = False) -> BundleCommandResult:
+    inspected = inspect_bundle(path)
+    models: dict[str, ModelValidation] = {}
+    with tempfile.TemporaryDirectory(prefix="miniverse-sdk-validate-") as directory, zipfile.ZipFile(path) as archive:
+        root = Path(directory)
+        for value in inspected.manifest.get("models", ()):
+            model_id = str(value["id"])
+            model_path = root / f"{model_id}.onnx"
+            with archive.open(f"models/{model_id}.onnx") as source, model_path.open("wb") as output:
+                while chunk := source.read(1024 * 1024):
+                    output.write(chunk)
+            models[model_id] = validate_model(model_path)
+
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    for model_id, validation in models.items():
+        errors.extend({**issue.as_dict(), "model": model_id} for issue in validation.errors)
+        warnings.extend({**issue.as_dict(), "model": model_id} for issue in validation.warnings)
+    errors.extend(issue.as_dict() for issue in validate_bundle_model_backends(inspected.manifest, models))
+    if strict:
+        errors.extend({**warning, "severity": "error", "promotedByStrict": True} for warning in warnings)
+    inspection = inspected.as_dict()
+    inspection.pop("model_findings", None)
+    value = {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "models": {model_id: validation.as_dict() for model_id, validation in models.items()},
+        **inspection,
+    }
+    return BundleCommandResult(value, 2 if errors else 0, inspected)
 
 
 def run(args: argparse.Namespace) -> Any:
@@ -212,35 +271,19 @@ def run(args: argparse.Namespace) -> Any:
         }
     if args.command == "model":
         path = Path(args.model)
-        if not path.is_file():
-            raise BundleValidationError("model_missing", f"model does not exist: {path}")
-        try:
-            with path.open("rb") as source:
-                scanned = scan_model(source)
-        except OnnxMetadataError as error:
-            raise BundleValidationError("invalid_model_metadata", str(error)) from error
-        if args.strict and scanned.findings:
-            raise _strict_failure({path.stem: scanned.findings})
-        from .onnx_metadata import compatibility_report
-
-        compatibility = compatibility_report(scanned.contract or {})
-        return {
-            "ok": not scanned.findings and not compatibility["incompatible"],
-            "precision": scanned.precision,
-            "findings": [asdict(finding) for finding in scanned.findings],
-            "compatibility": compatibility,
-        }
+        return _model_result(validate_model(path), strict=args.strict, model_id=path.stem)
     if args.command == "bundle":
-        if args.bundle_command in {"validate", "inspect"}:
+        if args.bundle_command == "validate":
+            validated = validate_bundle(args.bundle, strict=args.strict)
+            return CommandResult(validated.value, validated.exit_code)
+        if args.bundle_command == "inspect":
             inspected = inspect_bundle(args.bundle)
-            if getattr(args, "strict", False) and inspected.model_findings:
-                raise _strict_failure(inspected.model_findings)
-            return {"ok": True, **inspected.as_dict(include_manifest=args.bundle_command == "inspect")}
+            return {"ok": True, **inspected.as_dict(include_manifest=True)}
+        if args.bundle_command == "upload":
+            return bundle_upload(args)
         api_origin = origin(args.origin)
         saved, _ = credential(api_origin)
         client = Client(api_origin, saved)
-        if args.bundle_command == "upload":
-            return bundle_upload(args)
         if args.bundle_command == "status":
             return client.request(f"/api/v1/bundle-imports/{urllib.parse.quote(args.upload_id)}")
         if args.bundle_command == "list":
@@ -256,14 +299,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         value = run(args)
+        exit_code = value.exit_code if isinstance(value, CommandResult) else 0
+        if isinstance(value, CommandResult):
+            value = value.value
         if isinstance(value, str):
             print(value, end="")
         else:
             emit(value, bool(args.json or getattr(args, "command_json", False)))
-        return 0
+        return exit_code
     except BundleValidationError as error:
         details = getattr(error, "details", None)
-        emit({"ok": False, "code": error.code, "error": str(error), **({"findings": details} if details else {})}, True)
+        if isinstance(details, dict) and {"ok", "errors", "warnings"} <= set(details):
+            emit(details, True)
+        else:
+            issue = {"code": error.code, "severity": "error", "message": str(error)}
+            emit({"ok": False, "errors": details if isinstance(details, list) else [issue], "warnings": [], "models": {}}, True)
         return 2
     except ApiError as error:
         emit({"ok": False, "code": error.code, "status": error.status, "error": str(error)}, True)

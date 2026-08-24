@@ -7,6 +7,7 @@ from typing import BinaryIO
 
 ONNX_METADATA_KEY = "com.dollhouserobotics.miniverse.simulation_contract"
 ONNX_SCHEMA_KEY = "com.dollhouserobotics.miniverse.simulation_contract_schema_version"
+ONNX_HASH_KEY = "com.dollhouserobotics.miniverse.simulation_contract_hash"
 ONNX_SCHEMA_VERSION = "0.3"
 SUPPORTED_PRECISIONS = ("fp32", "fp16", "bf16")
 MAX_METADATA_ENTRY_BYTES = 512 * 1024
@@ -125,6 +126,12 @@ def parse_contract(metadata: dict[str, str]) -> dict:
         raise OnnxMetadataError("ONNX Miniverse contract is invalid JSON") from error
     if not isinstance(contract, dict) or contract.get("schemaVersion") != ONNX_SCHEMA_VERSION:
         raise OnnxMetadataError(f"ONNX checkpoint must use Miniverse contract schema {ONNX_SCHEMA_VERSION}")
+    from .validation import validate_onnx_contract_schema
+
+    schema_errors = validate_onnx_contract_schema(contract)
+    if schema_errors:
+        first = schema_errors[0]
+        raise OnnxMetadataError(f"ONNX simulation contract schema error at {first.path}: {first.message}")
     precision = contract.get("precision")
     if precision not in SUPPORTED_PRECISIONS:
         raise OnnxMetadataError(

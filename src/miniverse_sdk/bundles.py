@@ -185,13 +185,23 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         removed = sorted(set(manifest) & {"policyBindings", "scene", "seed", "robot", "visual", "primaryModel", "provenance"})
         if removed:
             raise BundleValidationError("invalid_manifest", f"bundle fields were removed: {', '.join(removed)}")
+        raw_embodiment = manifest.get("embodiment")
+        if isinstance(raw_embodiment, dict) and "dynamicsOverrides" in raw_embodiment:
+            raise BundleValidationError("invalid_manifest", "embodiment.dynamicsOverrides was removed; author actuator gains and limits in embodiment/mjcf.zip")
+        from .validation import validate_bundle_manifest
+
+        schema_errors = validate_bundle_manifest(manifest)
+        if schema_errors:
+            error = BundleValidationError("invalid_manifest_schema", f"bundle.json has {len(schema_errors)} schema error(s)")
+            error.details = [issue.as_dict() for issue in schema_errors]
+            raise error
         unknown = sorted(set(manifest) - SOURCE_FIELDS)
         if unknown:
             raise BundleValidationError("invalid_manifest", f"bundle manifest contains unknown fields: {', '.join(unknown)}")
         if manifest.get("version") != "v1":
             raise BundleValidationError("invalid_manifest", "bundle version must be v1")
         bundle_id = _string(manifest.get("id"), "bundle id", 128)
-        name = _string(manifest.get("name", bundle_id), "bundle name", 160)
+        name = _string(manifest.get("name"), "bundle name", 160)
         simulator = _string(manifest.get("primarySimulator"), "primarySimulator", 32)
         if simulator not in SIMULATORS:
             raise BundleValidationError("invalid_manifest", "primarySimulator is unsupported")
@@ -199,8 +209,6 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         if not isinstance(compatible, list) or any(value not in SIMULATORS or value == simulator for value in compatible) or len(set(compatible)) != len(compatible):
             raise BundleValidationError("invalid_manifest", "compatibleSimulators must contain distinct supported non-primary simulators")
         embodiment = _object(manifest.get("embodiment"), "embodiment")
-        if "dynamicsOverrides" in embodiment:
-            raise BundleValidationError("invalid_manifest", "embodiment.dynamicsOverrides was removed; author actuator gains and limits in embodiment/mjcf.zip")
         if set(embodiment) - {"appearance", "bodyDynamicsOverrides"}:
             raise BundleValidationError("invalid_manifest", "embodiment accepts appearance and bodyDynamicsOverrides; its MJCF is supplied by embodiment/mjcf.zip")
         _validate_body_dynamics_overrides(embodiment.get("bodyDynamicsOverrides"))

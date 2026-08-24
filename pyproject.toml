@@ -8,8 +8,13 @@ version = "0.2.0"
 description = "Validate and upload Dollhouse Robotics Miniverse simulation bundles."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["keyring>=25,<26"]
-license = "LicenseRef-Proprietary"
+dependencies = [
+  "jsonschema>=4.23,<5",
+  "keyring>=25,<26",
+  "onnx>=1.17,<2",
+]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Dollhouse Robotics" }]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -25,4 +30,4 @@ miniverse = "miniverse_sdk.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-miniverse_sdk = ["agent_help/*.md"]
+miniverse_sdk = ["agent_help/*.md", "schemas/*.json"]

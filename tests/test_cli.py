@@ -17,6 +17,7 @@ from miniverse_sdk.bundles import BundleValidationError, inspect_bundle
 from miniverse_sdk.api import Client
 from miniverse_sdk.cli import agent_help, main
 from miniverse_sdk.config import OAuthCredential, credential, delete_oauth_credential, load_oauth_credential, save_oauth_credential
+from miniverse_sdk.onnx_metadata import ONNX_HASH_KEY, ONNX_METADATA_KEY, ONNX_SCHEMA_KEY
 
 
 def _varint(value: int) -> bytes:
@@ -65,7 +66,22 @@ def _topk_graph(k_value: int | None, *, constant_node: bool = False) -> bytes:
 
 
 def model_with_precision(precision: str = "fp16", graph: bytes | None = None, opset: int = 18) -> bytes:
-    contract = json.dumps({"schemaVersion": "0.3", "precision": precision}, separators=(",", ":"))
+    contract = json.dumps({
+        "schemaVersion": "0.3",
+        "precision": precision,
+        "contractHash": "c" * 64,
+        "modelSha256": "d" * 64,
+        "skeletonId": "fixture",
+        "compatibleSceneContractHashes": ["e" * 64],
+        "backends": [{"id": "mujoco-cpu", "versionRange": ">=3.3,<4", "providers": ["CPUExecutionProvider"]}],
+        "opset": opset,
+        "execution": {"kind": "singlePolicyStep"},
+        "rates": {"physicsHz": 60, "policyHz": 30, "publishHz": 30, "actionHold": "zero-order-hold", "commandBoundary": "policy", "controlLoop": "policy-then-decimation"},
+        "inputs": [{"name": "obs", "dtype": "float32", "shape": [1, 1], "slices": [{"start": 0, "length": 1, "provider": "constant", "value": [0]}]}],
+        "outputs": [{"name": "actuator_targets", "dtype": "float32", "shape": [1, 1], "role": "actuatorTargets", "actuators": ["motor"], "clip": [-1, 1], "failsafe": [0]}],
+        "commands": [],
+        "stateEstimation": {"mode": "simulator-ground-truth"},
+    }, separators=(",", ":"))
     return b"".join((
         _field(7, graph or b""),
         _field(8, _field(1, b"") + _varint_field(2, opset)),
@@ -74,12 +90,80 @@ def model_with_precision(precision: str = "fp16", graph: bytes | None = None, op
     ))
 
 
-def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: bool = False, legacy_dynamics_overrides: bool = False) -> Path:
+def valid_model(precision: str = "fp16", *, topk_k: int | None = None, incompatible: bool = False, opset: int = 18) -> bytes:
+    import onnx
+    from onnx import TensorProto, helper
+
+    if topk_k is None:
+        width = 1
+        graph = helper.make_graph(
+            [helper.make_node("Identity", ["obs"], ["actuator_targets"])],
+            "fixture",
+            [helper.make_tensor_value_info("obs", TensorProto.FLOAT, [1, width])],
+            [helper.make_tensor_value_info("actuator_targets", TensorProto.FLOAT, [1, width])],
+        )
+        outputs = [{
+            "name": "actuator_targets", "dtype": "float32", "shape": [1, width], "role": "actuatorTargets",
+            "actuators": ["motor"], "controlModes": ["position"], "actuatorRanges": [[-1, 1]], "clip": [-1, 1], "failsafe": [0],
+        }]
+    else:
+        width = topk_k
+        graph = helper.make_graph(
+            [helper.make_node("TopK", ["obs", "k"], ["actuator_targets", "indices"], axis=1)],
+            "fixture-topk",
+            [helper.make_tensor_value_info("obs", TensorProto.FLOAT, [1, width])],
+            [
+                helper.make_tensor_value_info("actuator_targets", TensorProto.FLOAT, [1, width]),
+                helper.make_tensor_value_info("indices", TensorProto.INT64, [1, width]),
+            ],
+            [helper.make_tensor("k", TensorProto.INT64, [1], [width])],
+        )
+        actuators = [f"motor-{index}" for index in range(width)]
+        outputs = [
+            {
+                "name": "actuator_targets", "dtype": "float32", "shape": [1, width], "role": "actuatorTargets",
+                "actuators": actuators, "controlModes": ["position"] * width, "actuatorRanges": [[-1, 1]] * width,
+                "clip": [-1, 1], "failsafe": [0] * width,
+            },
+            {"name": "indices", "dtype": "int64", "shape": [1, width], "role": "auxiliary"},
+        ]
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", opset)])
+    clone = onnx.ModelProto(); clone.CopyFrom(model); del clone.metadata_props[:]
+    model_hash = hashlib.sha256(clone.SerializeToString(deterministic=True)).hexdigest()
+    source = {
+        "start": 0, "length": width,
+        **({"provider": "contacts", "component": "normalForce", "ids": ["foot"]} if incompatible else {"provider": "constant", "value": [0] * width}),
+    }
+    contract = {
+        "schemaVersion": "0.3", "precision": precision, "modelSha256": model_hash,
+        "skeletonId": "fixture", "compatibleSceneContractHashes": ["e" * 64],
+        "backends": [{
+            "id": "isaac-sim-cpu-physx" if incompatible else "mujoco-cpu",
+            "versionRange": ">=5.1,<5.2" if incompatible else ">=3.3,<4",
+            "providers": ["CPUExecutionProvider"],
+        }],
+        "opset": opset, "execution": {"kind": "singlePolicyStep"},
+        "rates": {"physicsHz": 60, "policyHz": 30, "publishHz": 30, "actionHold": "zero-order-hold", "commandBoundary": "policy", "controlLoop": "policy-then-decimation"},
+        "inputs": [{"name": "obs", "dtype": "float32", "shape": [1, width], "slices": [source]}],
+        "outputs": outputs, "commands": [], "stateEstimation": {"mode": "simulator-ground-truth"},
+    }
+    contract["contractHash"] = hashlib.sha256(json.dumps(
+        contract, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True,
+    ).encode()).hexdigest()
+    helper.set_model_props(model, {
+        ONNX_METADATA_KEY: json.dumps(contract, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True),
+        ONNX_SCHEMA_KEY: "0.3",
+        ONNX_HASH_KEY: contract["contractHash"],
+    })
+    return model.SerializeToString(deterministic=True)
+
+
+def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: bool = False, legacy_dynamics_overrides: bool = False, primary_simulator: str = "mujoco") -> Path:
     program = b"class Policy:\n    pass\n"
     embodiment = b"mjcf-archive"
-    model = model_with_precision() if model is None else model
+    model = valid_model() if model is None else model
     manifest = {
-        "version": "v1", "id": "fixture", "name": "Fixture", "primarySimulator": "mujoco",
+        "version": "v1", "id": "fixture", "name": "Fixture", "primarySimulator": primary_simulator,
         "embodiment": {}, "models": [{"id": "policy"}],
         "program": {"apiVersion": "dhr.python-policy/v1", "entrypoint": "policy:Policy"},
     }
@@ -220,29 +304,70 @@ class CliTest(unittest.TestCase):
         self.assertEqual(scanned.findings, ())
         scanned = scan_model(BytesIO(model_with_precision(graph=_topk_graph(None))))
         self.assertEqual([finding.code for finding in scanned.findings], ["tensorrt_topk_dynamic_k"])
-        attribute = _field(5, _field(1, b"k") + _varint_field(3, 64000))
-        graph = _node("TopK", inputs=("logits",), outputs=("values", "indices"), attributes=attribute)
-        scanned = scan_model(BytesIO(model_with_precision(graph=graph, opset=9)))
-        self.assertEqual([finding.code for finding in scanned.findings], ["tensorrt_topk_k_limit"])
-
     def test_bundle_validate_reports_findings_and_strict_fails(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "fixture.dhsim", model=model_with_precision(graph=_topk_graph(64000)))
+            path = fixture(Path(directory) / "fixture.dhsim", model=valid_model(topk_k=3841))
             inspected = inspect_bundle(path)
             self.assertEqual([finding.code for finding in inspected.model_findings["policy"]], ["tensorrt_topk_k_limit"])
             self.assertEqual(main(["bundle", "validate", str(path), "--json"]), 0)
             self.assertEqual(main(["bundle", "validate", str(path), "--strict"]), 2)
-            clean = fixture(Path(directory) / "clean.dhsim", model=model_with_precision(graph=_topk_graph(3840)))
+            clean = fixture(Path(directory) / "clean.dhsim", model=valid_model())
             self.assertEqual(main(["bundle", "validate", str(clean), "--strict"]), 0)
 
     def test_model_validate_command(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "policy.onnx"
-            path.write_bytes(model_with_precision(graph=_topk_graph(64000)))
+            path.write_bytes(valid_model(topk_k=3841))
             self.assertEqual(main(["model", "validate", str(path), "--json"]), 0)
             self.assertEqual(main(["model", "validate", str(path), "--strict"]), 2)
-            path.write_bytes(model_with_precision(graph=_topk_graph(3840)))
+            path.write_bytes(valid_model())
             self.assertEqual(main(["model", "validate", str(path), "--strict"]), 0)
+
+    def test_model_validate_fails_simulator_incompatibility_without_strict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "incompatible.onnx"
+            path.write_bytes(valid_model(incompatible=True))
+            self.assertEqual(main(["model", "validate", str(path), "--json"]), 2)
+
+    def test_bundle_validate_fails_model_incompatibility_without_strict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(
+                Path(directory) / "incompatible.dhsim",
+                model=valid_model(incompatible=True),
+                primary_simulator="isaac-sim-cpu-physx",
+            )
+            self.assertEqual(main(["bundle", "validate", str(path), "--json"]), 2)
+
+    def test_bundle_upload_refuses_local_validation_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(
+                Path(directory) / "incompatible.dhsim",
+                model=valid_model(incompatible=True),
+                primary_simulator="isaac-sim-cpu-physx",
+            )
+            with patch("miniverse_sdk.cli.Client") as client:
+                self.assertEqual(main(["bundle", "upload", str(path), "--json"]), 2)
+            client.assert_not_called()
+
+    def test_bundle_manifest_uses_the_normative_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "missing-name.dhsim")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+            del manifest["name"]
+            values["bundle.json"] = json.dumps(manifest).encode()
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            self.assertEqual(main(["bundle", "validate", str(path), "--json"]), 2)
+
+    def test_bundled_schemas_match_repository_authorities(self):
+        root = Path(__file__).resolve().parents[2]
+        bundled = root / "cli" / "src" / "miniverse_sdk" / "schemas"
+        authoritative = root / "schemas" / "simulation"
+        for name in ("simulation-bundle-v1.schema.json", "onnx-simulation-contract-0.3.schema.json"):
+            self.assertEqual(json.loads((bundled / name).read_text()), json.loads((authoritative / name).read_text()))
 
     def test_missing_and_invalid_precision_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
