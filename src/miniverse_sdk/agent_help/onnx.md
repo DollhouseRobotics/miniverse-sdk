@@ -14,15 +14,14 @@ graph bytes by hand.
 
 ## Contract requirements
 
-- Server-side import requires opset 13–21 (18 recommended), static shapes, and
-  batch size exactly 1 on every input and output. Local CLI validation does not
-  currently enforce the opset range or batch dimension, so treat a successful
-  local result as preflight feedback rather than import acceptance.
+- Server-side import requires opset 13–21 (18 recommended) with static input
+  and output shapes. Local CLI validation does not currently enforce the opset
+  range, so treat a successful local result as preflight feedback rather than
+  import acceptance.
 - Embed the Miniverse simulation contract (schema 0.3) in the model metadata,
   including `precision` (`fp32`, `fp16`, or `bf16`). Weights stay fp32 in the
   ONNX; `precision` declares the execution precision the compilers target.
-- Export a single policy step. Do not bake fixed-batch variants; the server
-  derives what it needs.
+- Export a single policy step.
 - Every graph op must be on the runtime allowlist (deterministic tensor math
   only); `miniverse model validate` reports violations as errors.
 - Recurrent policies declare `stateBindings` pairing a state input with a

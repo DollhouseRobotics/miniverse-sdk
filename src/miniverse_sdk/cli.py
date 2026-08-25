@@ -96,27 +96,26 @@ def bundle_upload(args: argparse.Namespace) -> dict[str, Any]:
     api_origin = origin(args.origin)
     saved, source = credential(api_origin)
     client = Client(api_origin, saved)
-    prepared = client.request("/api/v1/bundle-imports", {
+    prepared = client.request(f"/api/v1/bundles/{urllib.parse.quote(inspected.bundle_id, safe='._:-')}/revisions", {
         "archiveSha256": inspected.archive_sha256,
         "bytes": inspected.archive_bytes,
         "filename": Path(args.bundle).name,
         "idempotencyKey": args.idempotency_key or f"archive:{inspected.archive_sha256}",
-        "manifest": inspected.manifest,
-        "programSource": inspected.program_source,
-        "assets": [asset.__dict__ for asset in inspected.assets],
     })
     transfer = prepared.get("transfer")
     if not isinstance(transfer, dict) or transfer.get("mode") != "single" or not isinstance(transfer.get("url"), str):
         raise ApiError(502, "server returned unsupported upload instructions", "upload_contract_error")
     if not prepared.get("uploaded"):
-        client.upload(str(transfer["url"]), Path(args.bundle))
-    completed = client.request(f"/api/v1/bundle-imports/{prepared['uploadId']}/complete", {}, method="POST")
-    completed["credentialSource"] = source
+        headers = transfer.get("headers")
+        if headers is not None and (not isinstance(headers, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in headers.items())):
+            raise ApiError(502, "server returned invalid upload headers", "upload_contract_error")
+        client.upload(str(transfer["url"]), Path(args.bundle), headers)
+    prepared["credentialSource"] = source
     if args.no_wait:
-        return completed
-    status = client.wait_for_import(str(completed["statusUrl"]), args.timeout)
-    if status.get("state") in {"failed", "rejected", "cancelled"}:
-        raise ApiError(409, str(status.get("error") or "bundle import failed"), str(status.get("code") or "import_failed"))
+        return prepared
+    status = client.wait_for_import(str(prepared["statusUrl"]), args.timeout)
+    if status.get("state") == "failed":
+        raise ApiError(409, str(status.get("error") or "bundle revision failed"), str(status.get("code") or "revision_failed"))
     return status
 
 
@@ -158,12 +157,12 @@ def parser() -> argparse.ArgumentParser:
     model_validate.add_argument("--strict", action="store_true", help="Fail when any compatibility finding is present")
     model_validate.add_argument("--json", action="store_true", dest="command_json")
     status = bundle_commands.add_parser("status")
-    status.add_argument("upload_id")
+    status.add_argument("bundle_revision", help="Bundle revision as <id>@<revision-id>")
     status.add_argument("--json", action="store_true", dest="command_json")
     list_command = bundle_commands.add_parser("list")
     list_command.add_argument("--json", action="store_true", dest="command_json")
     publish = bundle_commands.add_parser("publish")
-    publish.add_argument("bundle_version", help="Bundle version as <id>@<digest>")
+    publish.add_argument("bundle_version", help="Bundle revision as <id>@<revision-id>")
     publish.add_argument("--json", action="store_true", dest="command_json")
     return root
 
@@ -242,13 +241,16 @@ def run(args: argparse.Namespace) -> Any:
         if args.bundle_command == "upload":
             return bundle_upload(args)
         if args.bundle_command == "status":
-            return client.request(f"/api/v1/bundle-imports/{urllib.parse.quote(args.upload_id)}")
+            bundle_id, separator, revision_id = args.bundle_revision.partition("@")
+            if not separator:
+                raise BundleValidationError("invalid_bundle_revision", "bundle revision must be <id>@<revision-id>")
+            return client.request(f"/api/v1/bundles/{urllib.parse.quote(bundle_id, safe='._:-')}/revisions/{urllib.parse.quote(revision_id)}")
         if args.bundle_command == "list":
-            return client.request("/api/v1/bundle-imports")
-        bundle_id, separator, digest = args.bundle_version.partition("@")
+            return client.request("/api/v1/bundle-revisions")
+        bundle_id, separator, revision_id = args.bundle_version.partition("@")
         if not separator:
-            raise BundleValidationError("invalid_bundle_version", "bundle version must be <id>@<digest>")
-        return client.request(f"/api/v1/bundles/{urllib.parse.quote(bundle_id)}/{urllib.parse.quote(digest)}/publish", {})
+            raise BundleValidationError("invalid_bundle_revision", "bundle revision must be <id>@<revision-id>")
+        return client.request(f"/api/v1/bundles/{urllib.parse.quote(bundle_id, safe='._:-')}/revisions/{urllib.parse.quote(revision_id)}/publish", {})
     raise RuntimeError("unreachable command")
 
 

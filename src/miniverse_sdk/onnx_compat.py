@@ -437,6 +437,6 @@ def scan_model(source: BinaryIO) -> ModelScan:
             findings.append(CompatFinding(
                 code="tensorrt_dynamic_shape", severity="error", op_type="", node=name,
                 message=f"tensor {name} has a dynamic or missing dimension; the contract requires static shapes and the TensorRT-RTX AOT builder has no optimization profile",
-                hint="export with fixed batch-one shapes (dynamic_axes=None); fixed-batch derivatives are generated server-side",
+                hint="export with static input and output shapes (dynamic_axes=None)",
             ))
     return ModelScan(precision=precision, findings=tuple(findings), contract=contract)
