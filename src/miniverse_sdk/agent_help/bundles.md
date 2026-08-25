@@ -39,9 +39,7 @@ adjacent JSON manifest. The embedded contract must include:
 
 Precision is the requested Miniverse inference/compiler precision; it does not
 assert that every tensor in the ONNX graph has that dtype. Missing and unknown
-precision values are rejected. Exporters using
-`miniverse.contracts.embed_onnx_contract` should pass
-`{"schemaVersion": "0.3", "precision": "fp16", ...}`.
+precision values are rejected.
 
 Run `miniverse bundle validate PATH.dhsim --json` before upload. Treat local
 validation as feedback; its `model_precisions` result reports the discovered
@@ -62,6 +60,4 @@ before it is zipped into a bundle, run:
 miniverse model validate PATH.onnx --json
 ```
 
-ONNX is the developer-facing checkpoint submission artifact. Developers do not
-build or upload TensorRT, TensorRT-RTX, plan, or runtime-cache files; Miniverse
-derives and invalidates those artifacts internally.
+ONNX is the checkpoint format accepted in a `.dhsim` bundle.
