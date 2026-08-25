@@ -118,7 +118,7 @@ class Client:
             )
             save_oauth_credential(self.credential)
 
-    def upload(self, url: str, path: Path) -> None:
+    def upload(self, url: str, path: Path, required_headers: dict[str, str] | None = None) -> None:
         parsed = urllib.parse.urlsplit(url)
         connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
         last_error: Exception | None = None
@@ -127,7 +127,10 @@ class Client:
             try:
                 target = urllib.parse.urlunsplit(("", "", parsed.path, parsed.query, ""))
                 connection.putrequest("PUT", target)
-                connection.putheader("content-type", "application/vnd.dhr.simulation-bundle+zip")
+                headers = {key.lower(): value for key, value in (required_headers or {}).items()}
+                headers.setdefault("content-type", "application/vnd.dhr.simulation-bundle+zip")
+                for key, value in headers.items():
+                    connection.putheader(key, value)
                 connection.putheader("content-length", str(path.stat().st_size))
                 connection.putheader("user-agent", f"miniverse-sdk/{__version__}")
                 connection.endheaders()
@@ -137,6 +140,8 @@ class Client:
                 response = connection.getresponse()
                 response.read()
                 if response.status in {200, 201, 204}:
+                    return
+                if response.status == 412 and headers.get("if-none-match") == "*":
                     return
                 last_error = ApiError(response.status, f"archive upload failed: {response.reason}", "upload_failed")
             except (OSError, http.client.HTTPException) as error:
@@ -153,7 +158,7 @@ class Client:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             value = self.request(status_url)
-            if value.get("state") in {"ready", "published", "failed", "rejected", "cancelled"}:
+            if value.get("state") in {"ready", "failed"}:
                 return value
             time.sleep(max(1, min(10, int(value.get("pollAfterSeconds", 2)))))
         raise ApiError(408, "bundle import did not finish before the timeout", "import_timeout")
