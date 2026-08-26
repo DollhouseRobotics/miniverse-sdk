@@ -1,9 +1,9 @@
 # Exporting TensorRT-compatible ONNX checkpoints
 
-Miniverse compiles every uploaded checkpoint with TensorRT-RTX and standard
-TensorRT to serve optimized inference. A checkpoint that only runs under the
-ONNX Runtime fallback still works, but loses the optimized path — so export
-with the compiler in mind, then lint before bundling:
+Miniverse attempts to compile each uploaded checkpoint with TensorRT-RTX and
+standard TensorRT to serve optimized inference. A checkpoint that only runs
+under the ONNX Runtime fallback still works, but loses the optimized path — so
+export with the compiler in mind, then lint before bundling:
 
 ```bash
 miniverse model validate model.onnx --strict --json
@@ -14,13 +14,14 @@ graph bytes by hand.
 
 ## Contract requirements
 
-- Opset 13–21 (18 recommended), static shapes, batch size exactly 1 on every
-  input and output.
+- Server-side import requires opset 13–21 (18 recommended) with static input
+  and output shapes. Local CLI validation does not currently enforce the opset
+  range, so treat a successful local result as preflight feedback rather than
+  import acceptance.
 - Embed the Miniverse simulation contract (schema 0.3) in the model metadata,
   including `precision` (`fp32`, `fp16`, or `bf16`). Weights stay fp32 in the
   ONNX; `precision` declares the execution precision the compilers target.
-- Export a single policy step. Do not bake fixed-batch variants; the server
-  derives what it needs.
+- Export a single policy step.
 - Every graph op must be on the runtime allowlist (deterministic tensor math
   only); `miniverse model validate` reports violations as errors.
 - Recurrent policies declare `stateBindings` pairing a state input with a
@@ -46,14 +47,14 @@ Do not simply cap K when doing so changes policy behavior.
 **Keep every `TopK` K a graph constant.** Shape-derived or otherwise dynamic
 K cannot be verified at build time and fails compilation.
 
-**Declare `precision: "fp16"` only when the whole graph tolerates it.** The
-compilers convert every float tensor, not just the network weights. An fp16
-cumulative distribution resolves ~5e-4 absolute, so an in-graph sampler over a
-large vocabulary cannot draw tokens below that probability and their mass
-shifts onto neighbours — a silent behavior change that ONNX Runtime (which
-executes the declared fp32 graph) never shows. Declare `fp32` for
-sampler-bearing graphs unless the CDF is kept in full precision by
-construction.
+**For generative policies with in-graph sampling, declare `precision: "fp16"`
+only when the whole graph tolerates it.** The compilers convert every float
+tensor, not just the network weights. An fp16 cumulative distribution resolves
+~5e-4 absolute, so a sampler over a large vocabulary cannot draw tokens below
+that probability and their mass shifts onto neighbours — a silent behavior
+change that ONNX Runtime (which executes the declared fp32 graph) never shows.
+Declare `fp32` for sampler-bearing graphs unless the CDF is kept in full
+precision by construction.
 
 **No data-dependent control flow.** Unroll loops to a fixed iteration count at
 export; avoid `If`/`Loop`/`Scan` nodes.
@@ -65,7 +66,7 @@ if a checkpoint only compiles after altering precision, treat it as
 incompatible and report the finding to the user instead of uploading the
 modified graph.
 
-**Avoid known PyTorch export traps:**
+**For transformer-based policies, avoid known PyTorch export traps:**
 
 - Disable the fused transformer fast path before export
   (`torch.backends.mha.set_fastpath_enabled(False)`); the fused aten op has no

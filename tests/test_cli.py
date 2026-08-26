@@ -183,6 +183,8 @@ class Handler(BaseHTTPRequestHandler):
     archive = b""
     state = "created"
     token = ""
+    conditional = ""
+    request_fields = set()
 
     def log_message(self, *_args):
         pass
@@ -200,23 +202,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "unauthorized", "code": "access_required"}, 401)
         length = int(self.headers.get("content-length", "0"))
         value = json.loads(self.rfile.read(length) or b"{}")
-        if self.path == "/api/v1/bundle-imports":
+        if self.path == "/api/v1/bundles/fixture/revisions":
+            Handler.request_fields = set(value)
             Handler.token = value["archiveSha256"]
-            return self._json({"uploadId": "bup_fixture", "uploaded": False, "transfer": {"mode": "single", "url": f"http://127.0.0.1:{self.server.server_port}/r2/source"}, "statusUrl": "/api/v1/bundle-imports/bup_fixture"}, 201)
-        if self.path.endswith("/complete"):
-            Handler.state = "ready"
-            return self._json({"uploadId": "bup_fixture", "state": "ready", "statusUrl": "/api/v1/bundle-imports/bup_fixture"}, 202)
+            return self._json({"revisionId": "brv_" + "1" * 32, "uploaded": False, "transfer": {"mode": "single", "url": f"http://127.0.0.1:{self.server.server_port}/r2/source", "headers": {"content-type": "application/vnd.dhr.simulation-bundle+zip", "if-none-match": "*"}}, "statusUrl": "/api/v1/bundles/fixture/revisions/brv_" + "1" * 32}, 201)
         return self._json({"error": "not found"}, 404)
 
     def do_PUT(self):
         length = int(self.headers.get("content-length", "0"))
         Handler.archive = self.rfile.read(length)
+        Handler.conditional = self.headers.get("if-none-match", "")
+        Handler.state = "ready"
         self.send_response(200)
         self.end_headers()
 
     def do_GET(self):
-        if self.path == "/api/v1/bundle-imports/bup_fixture":
-            return self._json({"uploadId": "bup_fixture", "state": Handler.state, "archiveSha256": Handler.token, "bundleId": "fixture", "bundleDigest": "d" * 64})
+        if self.path == "/api/v1/bundles/fixture/revisions/brv_" + "1" * 32:
+            return self._json({"revisionId": "brv_" + "1" * 32, "state": Handler.state, "archiveSha256": Handler.token, "bundleId": "fixture", "bundleDigest": "d" * 64})
         return self._json({"error": "not found"}, 404)
 
 
@@ -276,7 +278,7 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(inspected.assets), 3)
             self.assertEqual(inspected.model_precisions, {"policy": "fp16"})
         self.assertIn("MINIVERSE_API_TOKEN", agent_help("auth", False))
-        self.assertIn("server verifies and expands", agent_help("upload", False))
+        self.assertIn("object-create event starts server-side", agent_help("upload", False))
 
     def test_bundle_rejects_removed_policy_bindings(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -461,6 +463,8 @@ class CliTest(unittest.TestCase):
                     code = main(["--origin", f"http://127.0.0.1:{server.server_port}", "--json", "bundle", "upload", str(path)])
                 self.assertEqual(code, 0)
                 self.assertEqual(hashlib.sha256(Handler.archive).hexdigest(), Handler.token)
+                self.assertEqual(Handler.conditional, "*")
+                self.assertEqual(Handler.request_fields, {"archiveSha256", "bytes", "filename", "idempotencyKey"})
             finally:
                 server.shutdown()
                 thread.join()

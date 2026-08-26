@@ -23,6 +23,8 @@ ephemeral agent or container must mount that directory across runs.
 The renewable credential format is a hard cutover. A pre-0.2 keyring login is
 not read, copied, or deleted; run `miniverse auth login` once after upgrading.
 
-Inspect only non-secret metadata with `miniverse auth status`; remove and revoke
-the OAuth credential with `miniverse auth logout`. To opt back into an available
-desktop credential service, set `MINIVERSE_AUTH_STORE=keyring`.
+Inspect only non-secret metadata with `miniverse auth status`. Run
+`miniverse auth logout` to remove the local OAuth credential and attempt
+server-side revocation; local removal still succeeds if revocation is
+unavailable. To opt back into an available desktop credential service, set
+`MINIVERSE_AUTH_STORE=keyring`.
