@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dollhouserobotics.com/schemas/onnx-simulation-contract-0.3.schema.json",
+  "title": "Miniverse ONNX simulation contract v0.3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "precision", "contractHash", "modelSha256", "skeletonId", "compatibleSceneContractHashes", "backends", "opset", "execution", "rates", "inputs", "outputs", "commands", "stateEstimation"],
+  "properties": {
+    "schemaVersion": {"const": "0.3"},
+    "precision": {"enum": ["fp32", "fp16", "bf16"]},
+    "contractHash": {"$ref": "#/$defs/hash"},
+    "modelSha256": {"$ref": "#/$defs/hash"},
+    "skeletonId": {"$ref": "#/$defs/id"},
+    "compatibleSceneContractHashes": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/hash"}},
+    "backends": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/backend"}},
+    "opset": {"type": "integer", "minimum": 13, "maximum": 21},
+    "execution": {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "singlePolicyStep"}}},
+    "rates": {"$ref": "#/$defs/rates"},
+    "inputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/tensor"}},
+    "outputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/output"}},
+    "stateBindings": {"type": "array", "items": {"$ref": "#/$defs/stateBinding"}},
+    "historyBuffers": {"type": "array", "items": {"$ref": "#/$defs/historyBuffer"}},
+    "commands": {"type": "array", "items": {"$ref": "#/$defs/command"}},
+    "stateEstimation": {"type": "object", "required": ["mode"], "properties": {"mode": {"enum": ["simulator-ground-truth", "built-in"]}}},
+    "provenance": {"type": "object"}
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "backend": {
+      "type": "object",
+      "required": ["id", "versionRange", "providers"],
+      "properties": {
+        "id": {"enum": ["mujoco-cpu", "mujoco-mjx", "mujoco-warp", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"]},
+        "versionRange": {"type": "string"},
+        "providers": {"type": "array", "items": {"enum": ["CPUExecutionProvider", "CUDAExecutionProvider", "TensorrtExecutionProvider"]}}
+      }
+    },
+    "rates": {
+      "type": "object",
+      "required": ["physicsHz", "policyHz", "publishHz", "actionHold", "commandBoundary"],
+      "properties": {
+        "physicsHz": {"type": "number", "exclusiveMinimum": 0},
+        "policyHz": {"type": "number", "exclusiveMinimum": 0},
+        "publishHz": {"type": "number", "exclusiveMinimum": 0, "maximum": 120},
+        "actionHold": {"enum": ["zero-order-hold"]},
+        "commandBoundary": {"enum": ["policy", "physics"]},
+        "controlLoop": {"enum": ["independent-clocks", "policy-then-decimation"]}
+      }
+    },
+    "sourceSlice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["length", "provider"],
+      "properties": {
+        "start": {"type": "integer", "minimum": 0},
+        "length": {"type": "integer", "minimum": 1},
+        "provider": {"enum": ["jointPosition", "jointVelocity", "jointEffort", "bodyPose", "bodyLinearVelocity", "bodyAngularVelocity", "projectedGravity", "contacts", "surfaceQuery", "command", "previousAction", "simTime", "constant", "history", "deterministicRandom"]},
+        "ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "component": {"type": "string"},
+        "commandId": {"$ref": "#/$defs/id"},
+        "value": {},
+        "historyKey": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["heightSamples", "heightmapNearest"]},
+        "terrainId": {"$ref": "#/$defs/id"},
+        "frame": {"type": "string"},
+        "points": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}}},
+        "maxDistance": {"type": "number", "exclusiveMinimum": 0},
+        "unit": {"type": "string"}
+      }
+    },
+    "slice": {
+      "allOf": [
+        {"$ref": "#/$defs/sourceSlice"},
+        {"required": ["start", "length", "provider"]}
+      ]
+    },
+    "tensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dtype", "shape"],
+      "properties": {
+        "name": {"$ref": "#/$defs/id"},
+        "dtype": {"enum": ["float32", "float64", "int32", "int64", "bool"]},
+        "shape": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "integer", "minimum": 1, "maximum": 1048576}},
+        "slices": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/slice"}}
+      }
+    },
+    "stateBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "inputName", "outputName"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "inputName": {"$ref": "#/$defs/id"},
+        "outputName": {"$ref": "#/$defs/id"},
+        "initial": {"anyOf": [{"const": "zeros"}, {"type": "array", "minItems": 1, "items": {"type": "number"}}]}
+      }
+    },
+    "historyBuffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "capacity", "sampleOffsets"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "source": {"$ref": "#/$defs/sourceSlice"},
+        "clock": {"enum": ["policy", "physics"]},
+        "capacity": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "sampleOffsets": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 0}},
+        "reset": {"enum": ["repeat-initial-state", "zeros"]}
+      }
+    },
+    "actuatorOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dtype", "shape", "role", "actuators", "clip", "failsafe"],
+      "properties": {
+        "name": {"$ref": "#/$defs/id"},
+        "dtype": {"enum": ["float32", "float64"]},
+        "shape": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "role": {"const": "actuatorTargets"},
+        "actuators": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id"}},
+        "controlMode": {"enum": ["position", "velocity", "effort", "pd-position"]},
+        "controlModes": {"type": "array", "items": {"enum": ["position", "velocity", "effort", "pd-position"]}},
+        "actuatorRanges": {"type": "array", "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}}},
+        "clip": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}},
+        "failsafe": {"type": ["number", "array"]}
+      }
+    },
+    "stateOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dtype", "shape", "role"],
+      "properties": {
+        "name": {"$ref": "#/$defs/id"},
+        "dtype": {"enum": ["float32", "float64", "int32", "int64", "bool"]},
+        "shape": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "role": {"const": "state"}
+      }
+    },
+    "auxiliaryOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dtype", "shape", "role"],
+      "properties": {
+        "name": {"$ref": "#/$defs/id"},
+        "dtype": {"enum": ["float32", "float64", "int32", "int64", "bool"]},
+        "shape": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "role": {"const": "auxiliary"},
+        "bind": {"type": "object", "additionalProperties": false, "properties": {"metric": {"$ref": "#/$defs/id"}}}
+      }
+    },
+    "output": {"oneOf": [{"$ref": "#/$defs/actuatorOutput"}, {"$ref": "#/$defs/stateOutput"}, {"$ref": "#/$defs/auxiliaryOutput"}]},
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "label", "unit", "default", "step", "deadzone", "frame", "inputName", "sliceStart", "sliceLength", "update", "timeoutMs", "failsafe"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["joystick2d", "scalar", "targetPosition", "heading", "boolean", "momentary"]},
+        "label": {"type": "string", "minLength": 1},
+        "unit": {"type": "string"},
+        "default": {},
+        "range": {"type": "array", "minItems": 2},
+        "step": {"type": "number", "exclusiveMinimum": 0},
+        "deadzone": {"type": "number", "minimum": 0},
+        "frame": {"type": "string"},
+        "inputName": {"$ref": "#/$defs/id"},
+        "sliceStart": {"type": "integer", "minimum": 0},
+        "sliceLength": {"type": "integer", "minimum": 1, "maximum": 64},
+        "update": {"enum": ["continuous", "on-release", "edge"]},
+        "timeoutMs": {"type": "integer", "minimum": 50, "maximum": 60000},
+        "failsafe": {},
+        "hidden": {"type": "boolean"},
+        "floorPicking": {"type": "boolean"},
+        "gizmoId": {"$ref": "#/$defs/id"},
+        "labelId": {"$ref": "#/$defs/id"},
+        "spatialLimit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "anchor", "maxDistance"],
+          "properties": {
+            "kind": {"const": "planarRadius"},
+            "anchor": {"const": "rootBody"},
+            "maxDistance": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"not": {"const": "targetPosition"}}}},
+          "then": {"required": ["range"]}
+        },
+        {
+          "if": {"required": ["spatialLimit"]},
+          "then": {
+            "properties": {
+              "kind": {"const": "targetPosition"},
+              "frame": {"const": "world"},
+              "sliceLength": {"const": 3}
+            },
+            "not": {"required": ["range"]}
+          }
+        }
+      ]
+    }
+  }
+}

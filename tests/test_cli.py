@@ -365,9 +365,9 @@ class CliTest(unittest.TestCase):
             self.assertEqual(main(["bundle", "validate", str(path), "--json"]), 2)
 
     def test_bundled_schemas_match_repository_authorities(self):
-        root = Path(__file__).resolve().parents[2]
-        bundled = root / "cli" / "src" / "miniverse_sdk" / "schemas"
-        authoritative = root / "schemas" / "simulation"
+        root = Path(__file__).resolve().parents[1]
+        bundled = root / "src" / "miniverse_sdk" / "schemas"
+        authoritative = root / "schemas"
         for name in ("simulation-bundle-v1.schema.json", "onnx-simulation-contract-0.3.schema.json"):
             self.assertEqual(json.loads((bundled / name).read_text()), json.loads((authoritative / name).read_text()))
 

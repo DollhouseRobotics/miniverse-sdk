@@ -31,3 +31,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 miniverse_sdk = ["agent_help/*.md", "schemas/*.json"]
+
+[project.urls]
+Homepage = "https://miniverse.bot"
+Repository = "https://github.com/DollhouseRobotics/miniverse-sdk"
+Issues = "https://github.com/DollhouseRobotics/miniverse-sdk/issues"
