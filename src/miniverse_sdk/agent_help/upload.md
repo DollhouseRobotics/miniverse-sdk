@@ -3,7 +3,7 @@
 Run:
 
 ```bash
-miniverse bundle upload PATH.dhsim --json
+miniverse bundle upload PATH.mini --json
 ```
 
 The CLI creates a D1-backed bundle revision and uploads the archive directly to

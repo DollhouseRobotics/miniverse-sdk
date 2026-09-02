@@ -4,7 +4,7 @@ For CI or another non-interactive environment, provide the token only through
 the environment:
 
 ```bash
-MINIVERSE_API_TOKEN=... miniverse bundle upload PATH.dhsim --json
+MINIVERSE_API_TOKEN=... miniverse bundle upload PATH.mini --json
 ```
 
 Do not pass a token as an argument, write it into repository files, or include

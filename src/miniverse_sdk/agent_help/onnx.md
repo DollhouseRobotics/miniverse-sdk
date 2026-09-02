@@ -79,8 +79,8 @@ modified graph.
 
 ```bash
 miniverse model validate model.onnx --strict --json
-miniverse bundle validate bundle.dhsim --strict --json
-miniverse bundle upload bundle.dhsim --json
+miniverse bundle validate bundle.mini --strict --json
+miniverse bundle upload bundle.mini --json
 ```
 
 `bundle validate` runs the same model validation across every model in the

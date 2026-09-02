@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from miniverse_sdk.bundles import BundleValidationError, inspect_bundle
 from miniverse_sdk.api import Client
-from miniverse_sdk.cli import agent_help, main
+from miniverse_sdk.cli import agent_help, main, parser
 from miniverse_sdk.config import OAuthCredential, credential, delete_oauth_credential, load_oauth_credential, save_oauth_credential
 from miniverse_sdk.onnx_metadata import ONNX_HASH_KEY, ONNX_METADATA_KEY, ONNX_SCHEMA_KEY
 
@@ -270,25 +270,35 @@ class CliTest(unittest.TestCase):
         self.assertEqual(row["isaac-sim-cpu-physx"], "unsupported")
         self.assertEqual(report["incompatible"], ["obs:contacts.normalForce@isaac-sim-cpu-physx"])
 
-    def test_validate_and_agent_help(self):
+    def test_validate_canonical_mini_extension_and_agent_help(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "fixture.dhsim")
+            path = fixture(Path(directory) / "fixture.mini")
             inspected = inspect_bundle(path)
             self.assertEqual(inspected.bundle_id, "fixture")
             self.assertEqual(len(inspected.assets), 3)
             self.assertEqual(inspected.model_precisions, {"policy": "fp16"})
-        self.assertIn("MINIVERSE_API_TOKEN", agent_help("auth", False))
-        self.assertIn("object-create event starts server-side", agent_help("upload", False))
+        help_text = agent_help(None, True)
+        self.assertIn("MINIVERSE_API_TOKEN", help_text)
+        self.assertIn("object-create event starts server-side", help_text)
+        self.assertIn(".mini", parser().format_help())
+        self.assertIn(".mini", help_text)
+        self.assertNotIn(".dhsim", parser().format_help())
+        self.assertNotIn(".dhsim", help_text)
+
+    def test_inspect_silently_accepts_legacy_dhsim_extension(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "legacy.dhsim")
+            self.assertEqual(inspect_bundle(path).bundle_id, "fixture")
 
     def test_bundle_rejects_removed_policy_bindings(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "legacy.dhsim", legacy_policy_bindings=True)
+            path = fixture(Path(directory) / "legacy.mini", legacy_policy_bindings=True)
             with self.assertRaisesRegex(BundleValidationError, "fields were removed: policyBindings"):
                 inspect_bundle(path)
 
     def test_bundle_rejects_removed_actuator_dynamics_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "legacy.dhsim", legacy_dynamics_overrides=True)
+            path = fixture(Path(directory) / "legacy.mini", legacy_dynamics_overrides=True)
             with self.assertRaisesRegex(BundleValidationError, "dynamicsOverrides was removed; author actuator gains and limits"):
                 inspect_bundle(path)
 
@@ -308,12 +318,12 @@ class CliTest(unittest.TestCase):
         self.assertEqual([finding.code for finding in scanned.findings], ["tensorrt_topk_dynamic_k"])
     def test_bundle_validate_reports_findings_and_strict_fails(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "fixture.dhsim", model=valid_model(topk_k=3841))
+            path = fixture(Path(directory) / "fixture.mini", model=valid_model(topk_k=3841))
             inspected = inspect_bundle(path)
             self.assertEqual([finding.code for finding in inspected.model_findings["policy"]], ["tensorrt_topk_k_limit"])
             self.assertEqual(main(["bundle", "validate", str(path), "--json"]), 0)
             self.assertEqual(main(["bundle", "validate", str(path), "--strict"]), 2)
-            clean = fixture(Path(directory) / "clean.dhsim", model=valid_model())
+            clean = fixture(Path(directory) / "clean.mini", model=valid_model())
             self.assertEqual(main(["bundle", "validate", str(clean), "--strict"]), 0)
 
     def test_model_validate_command(self):
@@ -334,7 +344,7 @@ class CliTest(unittest.TestCase):
     def test_bundle_validate_fails_model_incompatibility_without_strict(self):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(
-                Path(directory) / "incompatible.dhsim",
+                Path(directory) / "incompatible.mini",
                 model=valid_model(incompatible=True),
                 primary_simulator="isaac-sim-cpu-physx",
             )
@@ -343,7 +353,7 @@ class CliTest(unittest.TestCase):
     def test_bundle_upload_refuses_local_validation_errors(self):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(
-                Path(directory) / "incompatible.dhsim",
+                Path(directory) / "incompatible.mini",
                 model=valid_model(incompatible=True),
                 primary_simulator="isaac-sim-cpu-physx",
             )
@@ -353,7 +363,7 @@ class CliTest(unittest.TestCase):
 
     def test_bundle_manifest_uses_the_normative_schema(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "missing-name.dhsim")
+            path = fixture(Path(directory) / "missing-name.mini")
             with zipfile.ZipFile(path, "r") as archive:
                 values = {name: archive.read(name) for name in archive.namelist()}
             manifest = json.loads(values["bundle.json"])
@@ -373,7 +383,7 @@ class CliTest(unittest.TestCase):
 
     def test_missing_and_invalid_precision_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "fixture.dhsim")
+            path = fixture(Path(directory) / "fixture.mini")
             with zipfile.ZipFile(path, "r") as archive:
                 values = {name: archive.read(name) for name in archive.namelist()}
             for precision in ("tf32", None):
@@ -445,7 +455,7 @@ class CliTest(unittest.TestCase):
 
     def test_rejects_undeclared_and_traversal_members(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "fixture.dhsim")
+            path = fixture(Path(directory) / "fixture.mini")
             with zipfile.ZipFile(path, "a") as archive:
                 archive.writestr("extra.txt", "no")
             with self.assertRaises(BundleValidationError) as caught:
@@ -454,7 +464,7 @@ class CliTest(unittest.TestCase):
 
     def test_end_to_end_archive_upload(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = fixture(Path(directory) / "fixture.dhsim")
+            path = fixture(Path(directory) / "fixture.mini")
             server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()

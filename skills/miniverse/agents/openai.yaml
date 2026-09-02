@@ -1,4 +1,4 @@
 interface:
   display_name: "Miniverse"
   short_description: "Build and operate Miniverse simulation bundles"
-  default_prompt: "Use $miniverse to validate and upload a .dhsim simulation bundle."
+  default_prompt: "Use $miniverse to validate and upload a .mini simulation bundle."

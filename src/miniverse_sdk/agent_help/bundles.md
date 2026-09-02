@@ -1,6 +1,6 @@
 # Bundle validation
 
-A `.dhsim` archive contains exactly `bundle.json`, `policy.py`, mandatory
+A `.mini` archive contains exactly `bundle.json`, `policy.py`, mandatory
 `embodiment/mjcf.zip`, and one or more `models/<id>.onnx` files. Do not put a
 `scene`, `seed`, `robot`, `visual`, `primaryModel`, model providers,
 or model loading policy in `bundle.json`.
@@ -43,7 +43,7 @@ precision values are rejected. Exporters using
 `miniverse.contracts.embed_onnx_contract` should pass
 `{"schemaVersion": "0.3", "precision": "fp16", ...}`.
 
-Run `miniverse bundle validate PATH.dhsim --json` before upload. Local validation
+Run `miniverse bundle validate PATH.mini --json` before upload. Local validation
 checks the archive structure, normative manifest, ONNX graph and embedded
 contract, hashes, tensor mappings, fixed batch-one shapes, simulator support,
 and statically knowable compatibility. It returns `errors`, `warnings`, and a
