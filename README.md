@@ -1,7 +1,7 @@
 # Miniverse SDK
 
 `miniverse-sdk` installs the `miniverse` command for validating and uploading
-immutable `.dhsim` simulation bundles to [Miniverse](https://miniverse.bot).
+immutable `.mini` simulation bundles to [Miniverse](https://miniverse.bot).
 
 ## Install
 

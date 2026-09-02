@@ -1,6 +1,6 @@
 ---
 name: miniverse
-description: Work with Dollhouse Robotics Miniverse simulation bundles. Use for authoring, validating, inspecting, uploading, or publishing .dhsim bundles; packaging MJCF embodiments, ONNX policies, Python controllers, commands, or gizmos; and diagnosing Miniverse bundle-import failures.
+description: Work with Dollhouse Robotics Miniverse simulation bundles. Use for authoring, validating, inspecting, uploading, or publishing .mini bundles; packaging MJCF embodiments, ONNX policies, Python controllers, commands, or gizmos; and diagnosing Miniverse bundle-import failures.
 ---
 
 # Miniverse

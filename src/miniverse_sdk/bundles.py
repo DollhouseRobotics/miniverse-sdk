@@ -1,4 +1,4 @@
-"""Safe, streaming inspection of canonical Miniverse .dhsim archives."""
+"""Safe, streaming inspection of canonical Miniverse .mini archives."""
 
 from __future__ import annotations
 

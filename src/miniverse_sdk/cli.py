@@ -131,7 +131,7 @@ def bundle_upload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="miniverse", description="Validate and upload Miniverse .dhsim bundles.")
+    root = argparse.ArgumentParser(prog="miniverse", description="Validate and upload Miniverse .mini bundles.")
     root.add_argument("--origin", help="Miniverse API origin; defaults to MINIVERSE_ORIGIN or https://miniverse.bot")
     root.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     commands = root.add_subparsers(dest="command", required=True)

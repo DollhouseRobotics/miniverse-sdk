@@ -8,7 +8,7 @@ Start with:
 ```bash
 miniverse version --json
 miniverse auth status --json
-miniverse bundle validate PATH.dhsim --json
+miniverse bundle validate PATH.mini --json
 ```
 Use `miniverse auth login` once for a persistent agent workspace; the CLI
 refreshes that grant automatically. Use `MINIVERSE_API_TOKEN` for CI. Never
