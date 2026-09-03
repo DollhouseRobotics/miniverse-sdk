@@ -18,11 +18,19 @@
       "items": {"$ref": "#/$defs/simulator"}
     },
     "environment": {
-      "description": "Omit for builtin flat ground. Heightfields use the fixed environment/terrain.glb archive member.",
+      "description": "Omit for builtin flat ground. A GLB environment names its bundle-relative source member.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind"],
-      "properties": {"kind": {"const": "heightfield"}}
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": {"const": "glb"},
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//).+\\.glb$"
+        }
+      }
     },
     "embodiment": {
       "type": "object",

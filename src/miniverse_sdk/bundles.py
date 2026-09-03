@@ -133,6 +133,14 @@ def _hash(value: Any, label: str) -> str:
     return text
 
 
+def _environment_path(value: Any, label: str = "environment.path") -> str:
+    path = _string(value, label, 300)
+    parts = path.split("/")
+    if path.startswith("/") or "\\" in path or any(not part or part in {".", ".."} for part in parts) or not path.endswith(".glb"):
+        raise BundleValidationError("invalid_manifest", f"{label} must be a safe relative .glb path")
+    return path
+
+
 def _safe_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     infos = archive.infolist()
     if not infos or len(infos) > MAX_ENTRIES:
@@ -237,9 +245,12 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             expected[f"models/{model_id}.onnx"] = "model"
         environment = manifest.get("environment")
         if environment is not None:
-            if not isinstance(environment, dict) or environment != {"kind": "heightfield"}:
-                raise BundleValidationError("invalid_manifest", "environment must contain exactly kind=heightfield")
-            expected["environment/terrain.glb"] = "scene"
+            if not isinstance(environment, dict) or set(environment) != {"kind", "path"} or environment.get("kind") != "glb":
+                raise BundleValidationError("invalid_manifest", "environment must contain exactly kind=glb and path")
+            environment_path = _environment_path(environment.get("path"))
+            if environment_path in expected or environment_path == "bundle.json":
+                raise BundleValidationError("invalid_manifest", "environment.path collides with a reserved bundle member")
+            expected[environment_path] = "scene"
         undeclared = set(members) - set(expected) - {"bundle.json"}
         missing_assets = set(expected) - set(members)
         if missing_assets:

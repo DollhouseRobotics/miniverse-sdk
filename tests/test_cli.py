@@ -290,15 +290,16 @@ class CliTest(unittest.TestCase):
             self.assertEqual((inspected.width, inspected.height), (2, 2))
             self.assertEqual(inspected.xy_resolution, (0.1, 0.2))
 
-    def test_bundle_inspection_accepts_only_the_fixed_heightfield_member(self):
+    def test_bundle_inspection_accepts_a_declared_heightfield_glb_member(self):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(Path(directory) / "terrain.mini")
             with zipfile.ZipFile(path, "r") as archive:
                 values = {name: archive.read(name) for name in archive.namelist()}
             manifest = json.loads(values["bundle.json"])
-            manifest["environment"] = {"kind": "heightfield"}
+            environment_path = "environment/terrains/steps.glb"
+            manifest["environment"] = {"kind": "glb", "path": environment_path}
             values["bundle.json"] = json.dumps(manifest).encode()
-            values["environment/terrain.glb"] = build_heightfield_glb(
+            values[environment_path] = build_heightfield_glb(
                 terrain_id="steps", width=2, height=2, heights=[0, 0, 0.2, 0.2], xy_resolution=[0.1, 0.1], out_of_bounds="clamp",
             )
             with zipfile.ZipFile(path, "w") as archive:
@@ -306,8 +307,16 @@ class CliTest(unittest.TestCase):
                     archive.writestr(name, value)
             inspected = inspect_bundle(path)
             terrain = next(asset for asset in inspected.assets if asset.kind == "scene")
-            self.assertEqual(terrain.path, "environment/terrain.glb")
+            self.assertEqual(terrain.path, environment_path)
             self.assertEqual(terrain.heightfield["id"], "steps")
+
+            manifest["environment"]["path"] = "../steps.glb"
+            values["bundle.json"] = json.dumps(manifest).encode()
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "schema error"):
+                inspect_bundle(path)
 
     def test_heightfield_helpers_fail_with_structured_errors_for_malformed_metadata(self):
         from miniverse_sdk.terrain import TerrainValidationError

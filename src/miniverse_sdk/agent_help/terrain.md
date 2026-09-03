@@ -33,14 +33,11 @@ embedded float grid. The result is capped at 1,048,576 samples.
 Add this exact source declaration to `bundle.json`:
 
 ```json
-"environment": {"kind": "heightfield"}
+"environment": {"kind": "glb", "path": "environment/terrain.glb"}
 ```
 
-Then pack `environment/terrain.glb` at that fixed archive path and run
+Then pack the GLB at the declared archive path and run
 `miniverse bundle validate PATH.mini --json`. Validation reports the terrain
 ID, grid SHA-256, dimensions, origin, XY resolution, scale/offset, and
 out-of-bounds behavior. In policy code, use the same ID with
 `step.sim_queries.heightmap_nearest("climb-001", points)`.
-
-This contract intentionally covers one static heightfield per session. It does
-not define runtime terrain switching or episode-reset semantics.

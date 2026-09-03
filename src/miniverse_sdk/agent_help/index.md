@@ -19,6 +19,7 @@ Read the relevant topic before acting:
 ```bash
 miniverse agent-help auth
 miniverse agent-help bundles
+miniverse agent-help environments
 miniverse agent-help onnx
 miniverse agent-help terrain
 miniverse agent-help upload

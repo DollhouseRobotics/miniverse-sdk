@@ -2,14 +2,14 @@
 
 A `.mini` archive contains `bundle.json`, `policy.py`, mandatory
 `embodiment/mjcf.zip`, one or more `models/<id>.onnx` files, and optionally
-`environment/terrain.glb`. Do not put a
+an environment source and its dependencies. Do not put a
 `scene`, `seed`, `robot`, `visual`, `primaryModel`, model providers,
 or model loading policy in `bundle.json`.
 
-Omit `environment` for Miniverse flat ground. To use one static heightfield,
-put `"environment": {"kind": "heightfield"}` in `bundle.json` and generate
-the fixed `environment/terrain.glb` member with `miniverse terrain build`.
-Read `miniverse agent-help terrain` before converting height arrays.
+Omit `environment` for Miniverse flat ground. Otherwise declare the source kind
+and its safe bundle-relative path. Read `miniverse agent-help environments` for
+scene ownership and packaging, and `miniverse agent-help terrain` before
+converting height arrays.
 
 The Python controller declares
 its physics/policy/publication timing, owns randomness, sees all models through

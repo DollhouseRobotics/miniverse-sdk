@@ -29,9 +29,10 @@ miniverse terrain build heights.npy environment/terrain.glb \
   --id experiment-001 --cell-size 0.05 0.05 --out-of-bounds clamp --json
 ```
 
-Add `"environment": {"kind": "heightfield"}` to `bundle.json`, then pack the
-generated file at that exact path. Run `miniverse agent-help terrain` for the
-coordinate-frame, origin, scaling, and policy-query contract.
+Add `"environment": {"kind": "glb", "path": "environment/terrain.glb"}` to
+`bundle.json`, then pack the generated file at that declared path. Run
+`miniverse agent-help terrain` for the coordinate-frame, origin, scaling, and
+policy-query contract.
 
 ## Agent skill
 
