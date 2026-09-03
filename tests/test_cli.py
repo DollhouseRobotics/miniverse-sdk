@@ -18,6 +18,7 @@ from miniverse_sdk.api import Client
 from miniverse_sdk.cli import agent_help, main, parser
 from miniverse_sdk.config import OAuthCredential, credential, delete_oauth_credential, load_oauth_credential, save_oauth_credential
 from miniverse_sdk.onnx_metadata import ONNX_HASH_KEY, ONNX_METADATA_KEY, ONNX_SCHEMA_KEY
+from miniverse_sdk.terrain import build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb
 
 
 def _varint(value: int) -> bytes:
@@ -160,11 +161,11 @@ def valid_model(precision: str = "fp16", *, topk_k: int | None = None, incompati
 
 def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: bool = False, legacy_dynamics_overrides: bool = False, primary_simulator: str = "mujoco") -> Path:
     program = b"class Policy:\n    pass\n"
-    embodiment = b"mjcf-archive"
+    embodiment = b'<mujoco model="fixture"><worldbody><body name="robot"/></worldbody></mujoco>'
     model = valid_model() if model is None else model
     manifest = {
         "version": "v1", "id": "fixture", "name": "Fixture", "primarySimulator": primary_simulator,
-        "embodiment": {}, "models": [{"id": "policy"}],
+        "embodiment": {"kind": "mjcf", "path": "embodiment/robot.xml"}, "models": [{"id": "policy"}],
         "program": {"apiVersion": "dhr.python-policy/v1", "entrypoint": "policy:Policy"},
     }
     if legacy_policy_bindings:
@@ -174,7 +175,7 @@ def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: b
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("bundle.json", json.dumps(manifest))
         archive.writestr("policy.py", program)
-        archive.writestr("embodiment/mjcf.zip", embodiment)
+        archive.writestr("embodiment/robot.xml", embodiment)
         archive.writestr("models/policy.onnx", model)
     return path
 
@@ -257,6 +258,127 @@ class RefreshHandler(BaseHTTPRequestHandler):
         return self._json({"ok": True})
 
 class CliTest(unittest.TestCase):
+    def test_terrain_build_creates_the_canonical_data_only_grid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            heights = root / "heights.json"
+            output = root / "environment" / "terrain.glb"
+            heights.write_text("[[0, 1, 2], [3, 4, 5]]")
+            self.assertEqual(main([
+                "terrain", "build", str(heights), str(output), "--id", "climb-001",
+                "--cell-size", "0.25", "0.5", "--origin", "-0.25", "1", "0.1",
+                "--vertical-scale", "0.2", "--vertical-offset", "-0.1", "--out-of-bounds", "clamp", "--json",
+            ]), 0)
+            inspected = inspect_heightfield_glb(output.read_bytes())
+            self.assertEqual((inspected.id, inspected.width, inspected.height), ("climb-001", 3, 2))
+            self.assertEqual(inspected.xy_resolution, (0.25, 0.5))
+            self.assertEqual(main(["terrain", "build", str(heights), str(output), "--cell-size", "1", "1"]), 2)
+
+    def test_terrain_build_accepts_a_two_dimensional_numpy_array(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            heights = root / "heights.npy"
+            output = root / "environment" / "terrain.glb"
+            np.save(heights, np.asarray([[0, 0.1], [0.2, 0.3]], dtype=np.float32))
+            self.assertEqual(main([
+                "terrain", "build", str(heights), str(output),
+                "--id", "numpy-grid", "--cell-size", "0.1", "0.2", "--json",
+            ]), 0)
+            inspected = inspect_heightfield_glb(output.read_bytes())
+            self.assertEqual((inspected.width, inspected.height), (2, 2))
+            self.assertEqual(inspected.xy_resolution, (0.1, 0.2))
+
+    def test_bundle_inspection_accepts_a_declared_heightfield_glb_member(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "terrain.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+            environment_path = "environment/terrains/steps.glb"
+            manifest["environment"] = {"kind": "glb", "path": environment_path}
+            values["bundle.json"] = json.dumps(manifest).encode()
+            values[environment_path] = build_heightfield_glb(
+                terrain_id="steps", width=2, height=2, heights=[0, 0, 0.2, 0.2], xy_resolution=[0.1, 0.1], out_of_bounds="clamp",
+            )
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            inspected = inspect_bundle(path)
+            terrain = next(asset for asset in inspected.assets if asset.kind == "scene")
+            self.assertEqual(terrain.path, environment_path)
+            self.assertEqual(terrain.heightfield["id"], "steps")
+
+            manifest["environment"]["path"] = "../steps.glb"
+            values["bundle.json"] = json.dumps(manifest).encode()
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "schema error"):
+                inspect_bundle(path)
+
+    def test_bundle_embodiment_compiles_the_exact_mjcf_dependency_closure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            values["embodiment/robot.xml"] = b'<mujoco><include file="parts/body.xml"/></mujoco>'
+            values["embodiment/parts/body.xml"] = b'<mujocoinclude><worldbody><body name="robot"/></worldbody></mujocoinclude>'
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            inspected = inspect_bundle(path)
+            self.assertEqual(next(asset for asset in inspected.assets if asset.kind == "embodiment").path, "embodiment/robot.xml")
+
+            values["embodiment/unused.xml"] = b"<mujoco/>"
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "unused embodiment members"):
+                inspect_bundle(path)
+
+            del values["embodiment/unused.xml"]
+            del values["embodiment/parts/body.xml"]
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "dependency is missing"):
+                inspect_bundle(path)
+
+    def test_bundle_embodiment_rejects_dependency_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            values["embodiment/robot.xml"] = b'<mujoco><include file="../../escape.xml"/></mujoco>'
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "escapes the embodiment directory"):
+                inspect_bundle(path)
+
+    def test_heightfield_helpers_fail_with_structured_errors_for_malformed_metadata(self):
+        from miniverse_sdk.terrain import TerrainValidationError
+
+        with self.assertRaisesRegex(TerrainValidationError, "width must be an integer"):
+            build_heightfield_glb(
+                terrain_id="steps", width=2.5, height=2, heights=[0, 0, 0, 0], xy_resolution=[1, 1],
+            )
+        data = build_heightfield_glb(
+            terrain_id="steps", width=2, height=2, heights=[0, 0, 0, 0], xy_resolution=[1, 1],
+        )
+        malformed = data.replace(b'"cellSize":[1.0,1.0]', b'"cellSize":100000000')
+        self.assertNotEqual(malformed, data)
+        with self.assertRaisesRegex(TerrainValidationError, "XY resolution must contain"):
+            inspect_heightfield_glb(malformed)
+
+    def test_large_heightfields_report_portable_size_guidance(self):
+        self.assertEqual(heightfield_size_warnings(512, 512), ())
+        warnings = heightfield_size_warnings(513, 512)
+        self.assertEqual([warning["code"] for warning in warnings], ["large_heightfield"])
+        self.assertIn("not a routinely qualified Isaac fleet size", warnings[0]["hint"])
+
     def test_operation_lint_names_supporting_simulators_without_capability_declarations(self):
         from miniverse_sdk.onnx_metadata import compatibility_report
 

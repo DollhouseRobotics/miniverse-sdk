@@ -17,10 +17,28 @@
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/simulator"}
     },
+    "environment": {
+      "description": "Omit for builtin flat ground. A GLB environment names its bundle-relative source member.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": {"const": "glb"},
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//).+\\.glb$"
+        }
+      }
+    },
     "embodiment": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["kind", "path"],
       "properties": {
+        "kind": {"const": "mjcf"},
+        "path": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^embodiment/(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*\\\\).+\\.(?:xml|mjcf)$"},
         "appearance": {"$ref": "#/$defs/appearance"},
         "bodyDynamicsOverrides": {
           "type": "array", "maxItems": 64,
@@ -125,7 +143,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "geometry": {"enum": ["auto", "mjcf", "inertial"]},
+        "geometry": {"description": "auto and mjcf use authored geometry; inertial is an explicit debug-only visualization", "enum": ["auto", "mjcf", "inertial"]},
         "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
         "edge": {
           "type": "object",

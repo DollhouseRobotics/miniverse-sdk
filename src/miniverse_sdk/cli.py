@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -20,9 +21,10 @@ from . import __version__
 from .api import ApiError, Client
 from .bundles import BundleValidationError, inspect_bundle
 from .config import OAuthCredential, auth_file, auth_store, credential, delete_oauth_credential, origin, save_oauth_credential
+from .terrain import TerrainValidationError, build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb, load_height_array
 from .validation import ModelValidation, validate_bundle_model_backends, validate_model
 
-TOPICS = {"auth", "bundles", "upload", "sessions", "onnx"}
+TOPICS = {"auth", "bundles", "environments", "upload", "sessions", "onnx", "terrain"}
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,42 @@ def bundle_upload(args: argparse.Namespace) -> dict[str, Any]:
     return status
 
 
+def terrain_build(args: argparse.Namespace) -> dict[str, Any]:
+    width, height, values = load_height_array(args.heights)
+    data = build_heightfield_glb(
+        terrain_id=args.id,
+        width=width,
+        height=height,
+        heights=values,
+        xy_resolution=args.cell_size,
+        origin=args.origin,
+        vertical_scale=args.vertical_scale,
+        vertical_offset=args.vertical_offset,
+        out_of_bounds=args.out_of_bounds,
+        out_of_bounds_value=args.out_of_bounds_value,
+    )
+    output = Path(args.output)
+    if output.exists() and not args.force:
+        raise TerrainValidationError(f"output already exists: {output}; pass --force to replace it")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(prefix=f".{output.name}.", dir=output.parent, delete=False) as temporary:
+        temporary.write(data)
+        temporary_path = Path(temporary.name)
+    try:
+        os.replace(temporary_path, output)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    inspected = inspect_heightfield_glb(data)
+    return {
+        "ok": True,
+        "path": str(output),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
+        "heightfield": inspected.as_dict(),
+        "warnings": list(heightfield_size_warnings(inspected.width, inspected.height)),
+    }
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="miniverse", description="Validate and upload Miniverse .mini bundles.")
     root.add_argument("--origin", help="Miniverse API origin; defaults to MINIVERSE_ORIGIN or https://miniverse.bot")
@@ -167,6 +205,20 @@ def parser() -> argparse.ArgumentParser:
     model_validate.add_argument("model")
     model_validate.add_argument("--strict", action="store_true", help="Promote optimization warnings to validation errors")
     model_validate.add_argument("--json", action="store_true", dest="command_json")
+    terrain = commands.add_parser("terrain", help="Build canonical heightfield environment assets")
+    terrain_commands = terrain.add_subparsers(dest="terrain_command", required=True)
+    terrain_build_command = terrain_commands.add_parser("build", help="Build terrain.glb from a 2-D .npy or JSON height array")
+    terrain_build_command.add_argument("heights", help="2-D .npy or nested JSON height array; rows are +Y and columns are +X")
+    terrain_build_command.add_argument("output", help="Output GLB, normally environment/terrain.glb")
+    terrain_build_command.add_argument("--id", default="terrain", help="Stable terrain ID exposed to policy heightmap queries")
+    terrain_build_command.add_argument("--cell-size", nargs=2, type=float, required=True, metavar=("DX", "DY"), help="Grid spacing in meters")
+    terrain_build_command.add_argument("--origin", nargs=3, type=float, default=(0, 0, 0), metavar=("X", "Y", "Z"), help="World position of sample row 0, column 0")
+    terrain_build_command.add_argument("--vertical-scale", type=float, default=1)
+    terrain_build_command.add_argument("--vertical-offset", type=float, default=0)
+    terrain_build_command.add_argument("--out-of-bounds", choices=("error", "clamp", "constant"), default="error")
+    terrain_build_command.add_argument("--out-of-bounds-value", type=float)
+    terrain_build_command.add_argument("--force", action="store_true", help="Replace an existing output file")
+    terrain_build_command.add_argument("--json", action="store_true", dest="command_json")
     status = bundle_commands.add_parser("status")
     status.add_argument("bundle_revision", help="Bundle revision as <id>@<revision-id>")
     status.add_argument("--json", action="store_true", dest="command_json")
@@ -215,6 +267,12 @@ def validate_bundle(path: str | Path, *, strict: bool = False) -> BundleCommandR
             models[model_id] = validate_model(model_path)
 
     errors: list[dict[str, Any]] = []
+    operational_warnings = [
+        warning
+        for asset in inspected.assets
+        if asset.heightfield
+        for warning in heightfield_size_warnings(int(asset.heightfield["width"]), int(asset.heightfield["height"]))
+    ]
     warnings: list[dict[str, Any]] = []
     for model_id, validation in models.items():
         errors.extend({**issue.as_dict(), "model": model_id} for issue in validation.errors)
@@ -222,6 +280,7 @@ def validate_bundle(path: str | Path, *, strict: bool = False) -> BundleCommandR
     errors.extend(issue.as_dict() for issue in validate_bundle_model_backends(inspected.manifest, models))
     if strict:
         errors.extend({**warning, "severity": "error", "promotedByStrict": True} for warning in warnings)
+    warnings = operational_warnings + warnings
     inspection = inspected.as_dict()
     inspection.pop("model_findings", None)
     value = {
@@ -271,6 +330,8 @@ def run(args: argparse.Namespace) -> Any:
     if args.command == "model":
         path = Path(args.model)
         return _model_result(validate_model(path), strict=args.strict, model_id=path.stem)
+    if args.command == "terrain":
+        return terrain_build(args)
     if args.command == "bundle":
         if args.bundle_command == "validate":
             validated = validate_bundle(args.bundle, strict=args.strict)
@@ -316,6 +377,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             issue = {"code": error.code, "severity": "error", "message": str(error)}
             emit({"ok": False, "errors": details if isinstance(details, list) else [issue], "warnings": [], "models": {}}, True)
+        return 2
+    except TerrainValidationError as error:
+        emit({"ok": False, "errors": [{"code": "invalid_heightfield", "severity": "error", "message": str(error)}], "warnings": []}, True)
         return 2
     except ApiError as error:
         emit({"ok": False, "code": error.code, "status": error.status, "error": str(error)}, True)

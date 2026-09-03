@@ -1,7 +1,9 @@
 # Miniverse SDK
 
 `miniverse-sdk` installs the `miniverse` command for validating and uploading
-immutable `.mini` simulation bundles to [Miniverse](https://miniverse.bot).
+immutable `.mini` simulation bundles to [Miniverse](https://miniverse.bot). It
+also builds canonical heightfield assets from ordinary 2-D `.npy` or JSON
+arrays so the viewer, collision backend, and policy queries share one grid.
 
 ## Install
 
@@ -19,6 +21,22 @@ miniverse auth login
 Interactive access and refresh tokens are stored in a user-only file and
 renewed automatically. On ephemeral Linux agents, persist
 `$XDG_STATE_HOME/miniverse`, or `~/.local/state/miniverse`.
+
+## Heightfield terrain
+
+```bash
+miniverse terrain build heights.npy environment/terrain.glb \
+  --id experiment-001 --cell-size 0.05 0.05 --out-of-bounds clamp --json
+```
+
+Add `"environment": {"kind": "glb", "path": "environment/terrain.glb"}` to
+`bundle.json`, then pack the generated file at that declared path. Run
+`miniverse agent-help terrain` for the coordinate-frame, origin, scaling, and
+policy-query contract.
+
+Use 512 x 512 or smaller as the portable terrain budget. The CLI warns above
+that size; the 1,048,576-sample hard limit should be used only after measuring
+the target browser and simulator profile.
 
 ## Agent skill
 

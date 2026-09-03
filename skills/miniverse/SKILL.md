@@ -25,7 +25,10 @@ Before performing Miniverse work:
 When authoring or diagnosing controller observations:
 
 - Author the canonical archive layout: `bundle.json`, `policy.py`,
-  `embodiment/mjcf.zip`, and `models/<id>.onnx`.
+  an MJCF entrypoint and its dependencies under `embodiment/`,
+  `models/<id>.onnx`, and an optional environment entrypoint and dependencies
+  under `environment/`. Use `miniverse terrain build` for a heightfield and
+  read `miniverse agent-help environments` and `miniverse agent-help terrain`.
 
 - Treat `PolicyStep.sim_data` as the simulator-neutral physics snapshot. Read
   contract ordering and static/runtime model values from `sim_data.model`; read
@@ -46,7 +49,7 @@ When authoring or diagnosing controller observations:
   compiled default pose.
 - Treat embodiment visuals as platform-derived output selected by
   `embodiment.appearance.geometry`, with simulation geometry authored in MJCF.
-- Author actuator gains and limits in the canonical MJCF archive. Put per-body
+- Author actuator gains and limits in the embodiment MJCF. Put per-body
   linear/angular damping and maximum linear/angular velocity under
   `embodiment.bodyDynamicsOverrides`, using exact MJCF body IDs.
 - Use `step.sim_queries.height_samples(...)` for live collision raycasts and

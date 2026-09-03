@@ -1,9 +1,17 @@
 # Bundle validation
 
-A `.mini` archive contains exactly `bundle.json`, `policy.py`, mandatory
-`embodiment/mjcf.zip`, and one or more `models/<id>.onnx` files. Do not put a
+A `.mini` archive contains `bundle.json`, `policy.py`, an MJCF embodiment
+entrypoint and its dependencies under `embodiment/`, one or more
+`models/<id>.onnx` files, and optionally an environment source and its
+dependencies. Declare the embodiment as
+`{"kind":"mjcf","path":"embodiment/robot.xml"}`. Do not put a
 `scene`, `seed`, `robot`, `visual`, `primaryModel`, model providers,
 or model loading policy in `bundle.json`.
+
+Omit `environment` for Miniverse flat ground. Otherwise declare the source kind
+and its safe bundle-relative path. Read `miniverse agent-help environments` for
+scene ownership and packaging, and `miniverse agent-help terrain` before
+converting height arrays.
 
 The Python controller declares
 its physics/policy/publication timing, owns randomness, sees all models through
@@ -23,7 +31,7 @@ without changing the bundle schema or simulation dynamics. Author visual `pos`,
 `quat`, and `fromto` values in the MJCF source frame.
 
 Author actuator gains, control/force ranges, and Miniverse's namespaced
-actuator velocity-limit numeric directly in `embodiment/mjcf.zip`. Use
+actuator velocity-limit numeric directly in the embodiment MJCF. Use
 `embodiment.bodyDynamicsOverrides` only for exact named-body linear/angular
 damping and maximum linear/angular velocity. Unsupported backends produce a
 descriptive runtime error.
@@ -50,7 +58,7 @@ and statically knowable compatibility. It returns `errors`, `warnings`, and a
 per-model result. Errors always produce exit status 2. Optimization warnings
 produce exit status 0 unless `--strict` promotes them to errors. Server import
 repeats validation over the uploaded bytes and remains authoritative for
-embodiment/scene preprocessing and genuine backend execution. Treat an uploaded
+embodiment/environment preprocessing and genuine backend execution. Treat an uploaded
 bundle as immutable and preserve simulator profile, model, embodiment,
 coordinate-frame, and actuator-order identities.
 

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
+import re
 import stat
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
+from xml.etree import ElementTree
 
 from .onnx_compat import CompatFinding, scan_model
 from .onnx_metadata import OnnxMetadataError
@@ -19,7 +22,7 @@ MAX_EXPANDED_BYTES = 4 * 1024 * 1024 * 1024
 MAX_ENTRIES = 64
 MAX_COMPRESSION_RATIO = 200
 SIMULATORS = {"mujoco", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"}
-SOURCE_FIELDS = {"version", "id", "name", "description", "primarySimulator", "compatibleSimulators", "embodiment", "models", "program", "commands", "ui", "gizmos", "webModules", "metadata"}
+SOURCE_FIELDS = {"version", "id", "name", "description", "primarySimulator", "compatibleSimulators", "environment", "embodiment", "models", "program", "commands", "ui", "gizmos", "webModules", "metadata"}
 
 
 class BundleValidationError(ValueError):
@@ -36,6 +39,7 @@ class AssetInspection:
     path: str
     sha256: str
     bytes: int
+    heightfield: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,10 @@ class BundleInspection:
 
     def as_dict(self, include_manifest: bool = False) -> dict[str, Any]:
         value = asdict(self)
+        value["assets"] = [
+            {key: item for key, item in asset.items() if item is not None}
+            for asset in value["assets"]
+        ]
         if not include_manifest:
             value.pop("manifest")
             value.pop("program_source")
@@ -128,6 +136,104 @@ def _hash(value: Any, label: str) -> str:
     return text
 
 
+def _environment_path(value: Any, label: str = "environment.path") -> str:
+    path = _string(value, label, 300)
+    parts = path.split("/")
+    if not path.startswith("environment/") or "\\" in path or any(not part or part in {".", ".."} for part in parts) or not path.endswith(".glb"):
+        raise BundleValidationError("invalid_manifest", f"{label} must be a safe relative .glb path")
+    return path
+
+
+def _mjcf_path(value: Any, label: str) -> str:
+    path = _string(value, label, 300)
+    parts = path.split("/")
+    if "\\" in path or any(not part or part in {".", ".."} for part in parts) or PurePosixPath(path).suffix.lower() not in {".xml", ".mjcf"}:
+        raise BundleValidationError("invalid_manifest", f"{label} must be a safe relative MJCF path")
+    return path
+
+
+def _resolve_mjcf(base: PurePosixPath, value: str, label: str) -> str:
+    if not value or "\\" in value or "\x00" in value or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value) or PurePosixPath(value).is_absolute():
+        raise BundleValidationError("invalid_embodiment", f"{label} must be a local relative path")
+    parts = list(base.parts)
+    for part in PurePosixPath(value).parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not parts:
+                raise BundleValidationError("invalid_embodiment", f"{label} escapes the embodiment directory")
+            parts.pop()
+        else:
+            parts.append(part)
+    return "/".join(parts)
+
+
+def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.ZipInfo], declaration: dict[str, Any]) -> tuple[str, bytes]:
+    if declaration.get("kind") != "mjcf":
+        raise BundleValidationError("invalid_manifest", "embodiment.kind must be mjcf")
+    full_entrypoint = _mjcf_path(declaration.get("path"), "embodiment.path")
+    if not full_entrypoint.startswith("embodiment/"):
+        raise BundleValidationError("invalid_manifest", "embodiment.path must be under embodiment/")
+    available = {name.removeprefix("embodiment/"): archive.read(name) for name in members if name.startswith("embodiment/")}
+    entrypoint = full_entrypoint.removeprefix("embodiment/")
+    if entrypoint not in available:
+        raise BundleValidationError("missing_member", "bundle embodiment entrypoint is missing")
+    pending = [entrypoint]
+    selected: dict[str, bytes] = {}
+    meshdir = ""
+    texturedir = ""
+    while pending:
+        relative = pending.pop()
+        if relative in selected:
+            continue
+        if relative not in available:
+            raise BundleValidationError("missing_member", f"bundle embodiment dependency is missing: embodiment/{relative}")
+        data = available[relative]
+        if not data or len(data) > 256 * 1024 * 1024:
+            raise BundleValidationError("invalid_embodiment", f"embodiment/{relative} has an invalid byte length")
+        selected[relative] = data
+        if len(selected) > 4096:
+            raise BundleValidationError("invalid_embodiment", "embodiment contains too many files")
+        if PurePosixPath(relative).suffix.lower() not in {".xml", ".mjcf"}:
+            continue
+        try:
+            document = ElementTree.fromstring(data)
+        except ElementTree.ParseError as error:
+            raise BundleValidationError("invalid_embodiment", f"embodiment/{relative} is invalid MJCF XML") from error
+        compiler = document.find("compiler")
+        if compiler is not None:
+            meshdir = str(compiler.get("meshdir", "")).strip()
+            texturedir = str(compiler.get("texturedir", "")).strip()
+        parent = PurePosixPath(relative).parent
+        for include in document.iter("include"):
+            pending.append(_resolve_mjcf(parent, str(include.get("file", "")).strip(), "MJCF include"))
+        for element in document.iter():
+            name = str(element.get("file", "")).strip()
+            if not name or element.tag == "include":
+                continue
+            directory = meshdir if element.tag in {"mesh", "skin"} else texturedir if element.tag in {"texture", "hfield"} else ""
+            base = PurePosixPath(entrypoint).parent
+            if directory:
+                base = PurePosixPath(_resolve_mjcf(base, directory, f"MJCF {element.tag} directory"))
+            pending.append(_resolve_mjcf(base, name, f"MJCF {element.tag} asset"))
+    if selected != available:
+        extras = sorted(set(available) - set(selected))
+        raise BundleValidationError("undeclared_member", f"bundle contains unused embodiment members: {', '.join('embodiment/' + name for name in extras)}")
+    entries = [{"path": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)} for name, data in sorted(selected.items())]
+    source = {"apiVersion": "dhr.mjcf-asset-set/v1", "entrypoint": entrypoint, "files": entries}
+    canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    manifest = {**source, "sourceHash": hashlib.sha256(canonical(source)).hexdigest()}
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as compiled:
+        for name, data in [("dhr-mjcf-assets.json", canonical(manifest)), *sorted(selected.items())]:
+            info = zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o100644 << 16
+            info.create_system = 3
+            compiled.writestr(info, data)
+    return full_entrypoint, output.getvalue()
+
+
 def _safe_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     infos = archive.infolist()
     if not infos or len(infos) > MAX_ENTRIES:
@@ -173,7 +279,7 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         raise BundleValidationError("invalid_zip", "bundle is not a valid ZIP archive") from error
     with archive:
         members = _safe_members(archive)
-        required = {"bundle.json", "policy.py", "embodiment/mjcf.zip"}
+        required = {"bundle.json", "policy.py"}
         missing = required - members.keys()
         if missing:
             raise BundleValidationError("missing_member", f"bundle is missing {', '.join(sorted(missing))}")
@@ -187,7 +293,7 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             raise BundleValidationError("invalid_manifest", f"bundle fields were removed: {', '.join(removed)}")
         raw_embodiment = manifest.get("embodiment")
         if isinstance(raw_embodiment, dict) and "dynamicsOverrides" in raw_embodiment:
-            raise BundleValidationError("invalid_manifest", "embodiment.dynamicsOverrides was removed; author actuator gains and limits in embodiment/mjcf.zip")
+            raise BundleValidationError("invalid_manifest", "embodiment.dynamicsOverrides was removed; author actuator gains and limits in the embodiment MJCF")
         from .validation import validate_bundle_manifest
 
         schema_errors = validate_bundle_manifest(manifest)
@@ -209,14 +315,15 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         if not isinstance(compatible, list) or any(value not in SIMULATORS or value == simulator for value in compatible) or len(set(compatible)) != len(compatible):
             raise BundleValidationError("invalid_manifest", "compatibleSimulators must contain distinct supported non-primary simulators")
         embodiment = _object(manifest.get("embodiment"), "embodiment")
-        if set(embodiment) - {"appearance", "bodyDynamicsOverrides"}:
-            raise BundleValidationError("invalid_manifest", "embodiment accepts appearance and bodyDynamicsOverrides; its MJCF is supplied by embodiment/mjcf.zip")
+        if set(embodiment) - {"kind", "path", "appearance", "bodyDynamicsOverrides"}:
+            raise BundleValidationError("invalid_manifest", "embodiment accepts kind, path, appearance, and bodyDynamicsOverrides")
         _validate_body_dynamics_overrides(embodiment.get("bodyDynamicsOverrides"))
+        embodiment_path, embodiment_archive = _compile_embodiment(archive, members, embodiment)
         program = _object(manifest.get("program"), "program")
         if set(program) != {"apiVersion", "entrypoint"} or program.get("apiVersion") != "dhr.python-policy/v1":
             raise BundleValidationError("invalid_manifest", "program must contain only apiVersion and entrypoint")
         _string(program.get("entrypoint"), "program.entrypoint", 200)
-        expected: dict[str, str] = {"policy.py": "program", "embodiment/mjcf.zip": "embodiment"}
+        expected: dict[str, str] = {"policy.py": "program"}
         models = manifest.get("models")
         if not isinstance(models, list) or not 1 <= len(models) <= 8:
             raise BundleValidationError("invalid_manifest", "bundle must declare between one and eight models")
@@ -230,7 +337,16 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             if set(model) != {"id"}:
                 raise BundleValidationError("invalid_manifest", f"model {model_id} accepts only id; hashes and providers are derived by Miniverse")
             expected[f"models/{model_id}.onnx"] = "model"
-        undeclared = set(members) - set(expected) - {"bundle.json"}
+        environment = manifest.get("environment")
+        if environment is not None:
+            if not isinstance(environment, dict) or set(environment) != {"kind", "path"} or environment.get("kind") != "glb":
+                raise BundleValidationError("invalid_manifest", "environment must contain exactly kind=glb and path")
+            environment_path = _environment_path(environment.get("path"))
+            if environment_path in expected or environment_path == "bundle.json":
+                raise BundleValidationError("invalid_manifest", "environment.path collides with a reserved bundle member")
+            expected[environment_path] = "scene"
+        embodiment_members = {name for name in members if name.startswith("embodiment/")}
+        undeclared = set(members) - set(expected) - embodiment_members - {"bundle.json"}
         missing_assets = set(expected) - set(members)
         if missing_assets:
             raise BundleValidationError("missing_member", f"bundle is missing {', '.join(sorted(missing_assets))}")
@@ -242,6 +358,7 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         program_hash = ""
         for archive_name, kind in expected.items():
             actual_hash, size = _sha256_stream(archive, archive_name)
+            heightfield = None
             if kind == "program":
                 program_hash = actual_hash
             if kind == "model":
@@ -254,7 +371,15 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
                 model_precisions[model_id] = scanned.precision
                 if scanned.findings:
                     model_findings[model_id] = scanned.findings
-            assets.append(AssetInspection(kind=kind, path=archive_name, sha256=actual_hash, bytes=size))
+            if kind == "scene":
+                from .terrain import TerrainValidationError, inspect_heightfield_glb
+
+                try:
+                    heightfield = inspect_heightfield_glb(archive.read(archive_name)).as_dict()
+                except TerrainValidationError as error:
+                    raise BundleValidationError("invalid_heightfield", f"{archive_name}: {error}") from error
+            assets.append(AssetInspection(kind=kind, path=archive_name, sha256=actual_hash, bytes=size, heightfield=heightfield))
+        assets.insert(1, AssetInspection(kind="embodiment", path=embodiment_path, sha256=hashlib.sha256(embodiment_archive).hexdigest(), bytes=len(embodiment_archive)))
         try:
             program_source = archive.read("policy.py").decode("utf-8")
         except UnicodeDecodeError as error:
