@@ -22,11 +22,12 @@ For an MJCF environment:
 }
 ```
 
-Paths are safe bundle-relative paths. Keep referenced meshes, textures,
-heightfields, includes, and other source files under `environment/`, and use
-relative references between them. Preserve source coordinate frames, units,
-transforms, joint axes and limits, masses, inertias, collision properties,
-friction, damping, materials, and asset identities.
+Paths are safe bundle-relative paths. Keep referenced includes and STL meshes
+under `environment/`, and use relative references between them. The complete
+subtree must be the entrypoint's dependency closure: missing, unused, escaping,
+case-colliding, or cyclic members fail validation. Preserve source coordinate
+frames, units, transforms, joint axes and limits, masses, inertias, collision
+properties, friction, damping, materials, and asset identities.
 
 Separate the embodiment from the environment by control ownership:
 
@@ -49,14 +50,21 @@ their identities and state namespaces separate. Environment bodies and passive
 joints remain environment state; they are not appended to the robot's actuator
 order.
 
-Choose `primarySimulator` for the authoritative execution target and list only
-the other verified targets in `compatibleSimulators`. Miniverse preprocesses
-the declared environment into immutable, content-addressed artifacts for the
-viewer and each declared simulation backend. MuJoCo uses the validated MJCF
-scene representation, Isaac Sim uses its validated scene representation, and
-the browser viewer uses the derived GLB representation. Policy code remains
-backend-neutral and addresses stable Miniverse body, joint, object, and query
-identities rather than simulator-private handles.
+The current MJCF environment slice is MuJoCo-only: set `primarySimulator` to
+`mujoco` and do not list either Isaac profile in `compatibleSimulators`.
+Miniverse preserves the validated MJCF closure for MuJoCo and derives a
+separate immutable GLB for the browser. Environment body transforms stream
+under `environment:<body-name>` object IDs. Policy code remains backend-neutral
+and environment joints never enter the embodiment actuator order.
+
+Supported MJCF environment physics includes fixed and unactuated passive rigid
+bodies; hinge, slide, ball, and free joints; primitive geoms; and STL meshes.
+Textures, skins, MJCF heightfields, non-STL meshes, actuators, sensors, tendons,
+equality/contact reference sections, keyframes, custom/global settings,
+plugins/extensions, flex/deformable/composite elements, and unsupported geom
+types fail closed. Use the canonical GLB heightfield contract for terrain.
+Passive-joint policy queries, MJCF-environment rollout GLB export, and Isaac MJCF
+environment conversion are not yet supported.
 
 For a heightfield sourced from a numeric grid, generate the GLB with
 `miniverse terrain build`, declare that generated file as a `glb` environment,

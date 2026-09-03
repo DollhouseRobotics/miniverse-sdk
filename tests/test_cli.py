@@ -358,6 +358,31 @@ class CliTest(unittest.TestCase):
             with self.assertRaisesRegex(BundleValidationError, "escapes the embodiment directory"):
                 inspect_bundle(path)
 
+    def test_bundle_mjcf_environment_compiles_its_exact_dependency_closure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+            manifest["environment"] = {"kind": "mjcf", "path": "environment/world.xml"}
+            values["bundle.json"] = json.dumps(manifest).encode()
+            values["environment/world.xml"] = b'<mujoco><include file="parts/swing.xml"/><worldbody><geom type="plane" size="5 5 .1"/></worldbody></mujoco>'
+            values["environment/parts/swing.xml"] = b'<mujocoinclude><worldbody><body name="swing"><joint name="hinge"/><geom type="box" size=".1 .1 .5"/></body></worldbody></mujocoinclude>'
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            inspected = inspect_bundle(path)
+            scene = next(asset for asset in inspected.assets if asset.kind == "scene")
+            self.assertEqual(scene.path, "environment/world.xml")
+            self.assertEqual(scene.kind, "scene")
+
+            values["environment/unused.xml"] = b"<mujoco/>"
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "unused environment members"):
+                inspect_bundle(path)
+
     def test_heightfield_helpers_fail_with_structured_errors_for_malformed_metadata(self):
         from miniverse_sdk.terrain import TerrainValidationError
 
