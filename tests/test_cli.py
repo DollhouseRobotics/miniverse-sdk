@@ -161,11 +161,11 @@ def valid_model(precision: str = "fp16", *, topk_k: int | None = None, incompati
 
 def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: bool = False, legacy_dynamics_overrides: bool = False, primary_simulator: str = "mujoco") -> Path:
     program = b"class Policy:\n    pass\n"
-    embodiment = b"mjcf-archive"
+    embodiment = b'<mujoco model="fixture"><worldbody><body name="robot"/></worldbody></mujoco>'
     model = valid_model() if model is None else model
     manifest = {
         "version": "v1", "id": "fixture", "name": "Fixture", "primarySimulator": primary_simulator,
-        "embodiment": {}, "models": [{"id": "policy"}],
+        "embodiment": {"kind": "mjcf", "path": "embodiment/robot.xml"}, "models": [{"id": "policy"}],
         "program": {"apiVersion": "dhr.python-policy/v1", "entrypoint": "policy:Policy"},
     }
     if legacy_policy_bindings:
@@ -175,7 +175,7 @@ def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: b
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("bundle.json", json.dumps(manifest))
         archive.writestr("policy.py", program)
-        archive.writestr("embodiment/mjcf.zip", embodiment)
+        archive.writestr("embodiment/robot.xml", embodiment)
         archive.writestr("models/policy.onnx", model)
     return path
 
@@ -316,6 +316,46 @@ class CliTest(unittest.TestCase):
                 for name, value in values.items():
                     archive.writestr(name, value)
             with self.assertRaisesRegex(BundleValidationError, "schema error"):
+                inspect_bundle(path)
+
+    def test_bundle_embodiment_compiles_the_exact_mjcf_dependency_closure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            values["embodiment/robot.xml"] = b'<mujoco><include file="parts/body.xml"/></mujoco>'
+            values["embodiment/parts/body.xml"] = b'<mujocoinclude><worldbody><body name="robot"/></worldbody></mujocoinclude>'
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            inspected = inspect_bundle(path)
+            self.assertEqual(next(asset for asset in inspected.assets if asset.kind == "embodiment").path, "embodiment/robot.xml")
+
+            values["embodiment/unused.xml"] = b"<mujoco/>"
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "unused embodiment members"):
+                inspect_bundle(path)
+
+            del values["embodiment/unused.xml"]
+            del values["embodiment/parts/body.xml"]
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "dependency is missing"):
+                inspect_bundle(path)
+
+    def test_bundle_embodiment_rejects_dependency_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "fixture.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            values["embodiment/robot.xml"] = b'<mujoco><include file="../../escape.xml"/></mujoco>'
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaisesRegex(BundleValidationError, "escapes the embodiment directory"):
                 inspect_bundle(path)
 
     def test_heightfield_helpers_fail_with_structured_errors_for_malformed_metadata(self):

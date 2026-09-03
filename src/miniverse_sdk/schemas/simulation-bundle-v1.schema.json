@@ -35,7 +35,10 @@
     "embodiment": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["kind", "path"],
       "properties": {
+        "kind": {"const": "mjcf"},
+        "path": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^embodiment/(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*\\\\).+\\.(?:xml|mjcf)$"},
         "appearance": {"$ref": "#/$defs/appearance"},
         "bodyDynamicsOverrides": {
           "type": "array", "maxItems": 64,

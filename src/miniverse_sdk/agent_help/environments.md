@@ -30,9 +30,10 @@ friction, damping, materials, and asset identities.
 
 Separate the embodiment from the environment by control ownership:
 
-- `embodiment/mjcf.zip` contains the policy-controlled robot: its bodies,
-  joints, actuators, robot sensors, collision geometry, and canonical actuator
-  ordering.
+- The MJCF entrypoint declared by `embodiment.path`, together with its relative
+  dependencies under `embodiment/`, defines the policy-controlled robot: its
+  bodies, joints, actuators, robot sensors, collision geometry, and canonical
+  actuator ordering.
 - `environment` contains the surrounding world: terrain, ground, buildings,
   props, obstacles, and mechanisms that are not controlled as robot actuators.
 - Articulation alone does not make an asset part of the embodiment. A swing set

@@ -1,8 +1,10 @@
 # Bundle validation
 
-A `.mini` archive contains `bundle.json`, `policy.py`, mandatory
-`embodiment/mjcf.zip`, one or more `models/<id>.onnx` files, and optionally
-an environment source and its dependencies. Do not put a
+A `.mini` archive contains `bundle.json`, `policy.py`, an MJCF embodiment
+entrypoint and its dependencies under `embodiment/`, one or more
+`models/<id>.onnx` files, and optionally an environment source and its
+dependencies. Declare the embodiment as
+`{"kind":"mjcf","path":"embodiment/robot.xml"}`. Do not put a
 `scene`, `seed`, `robot`, `visual`, `primaryModel`, model providers,
 or model loading policy in `bundle.json`.
 
@@ -29,7 +31,7 @@ without changing the bundle schema or simulation dynamics. Author visual `pos`,
 `quat`, and `fromto` values in the MJCF source frame.
 
 Author actuator gains, control/force ranges, and Miniverse's namespaced
-actuator velocity-limit numeric directly in `embodiment/mjcf.zip`. Use
+actuator velocity-limit numeric directly in the embodiment MJCF. Use
 `embodiment.bodyDynamicsOverrides` only for exact named-body linear/angular
 damping and maximum linear/angular velocity. Unsupported backends produce a
 descriptive runtime error.
