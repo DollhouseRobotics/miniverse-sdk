@@ -21,7 +21,7 @@ from . import __version__
 from .api import ApiError, Client
 from .bundles import BundleValidationError, inspect_bundle
 from .config import OAuthCredential, auth_file, auth_store, credential, delete_oauth_credential, origin, save_oauth_credential
-from .terrain import TerrainValidationError, build_heightfield_glb, inspect_heightfield_glb, load_height_array
+from .terrain import TerrainValidationError, build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb, load_height_array
 from .validation import ModelValidation, validate_bundle_model_backends, validate_model
 
 TOPICS = {"auth", "bundles", "environments", "upload", "sessions", "onnx", "terrain"}
@@ -164,6 +164,7 @@ def terrain_build(args: argparse.Namespace) -> dict[str, Any]:
         "sha256": hashlib.sha256(data).hexdigest(),
         "bytes": len(data),
         "heightfield": inspected.as_dict(),
+        "warnings": list(heightfield_size_warnings(inspected.width, inspected.height)),
     }
 
 
@@ -266,6 +267,12 @@ def validate_bundle(path: str | Path, *, strict: bool = False) -> BundleCommandR
             models[model_id] = validate_model(model_path)
 
     errors: list[dict[str, Any]] = []
+    operational_warnings = [
+        warning
+        for asset in inspected.assets
+        if asset.heightfield
+        for warning in heightfield_size_warnings(int(asset.heightfield["width"]), int(asset.heightfield["height"]))
+    ]
     warnings: list[dict[str, Any]] = []
     for model_id, validation in models.items():
         errors.extend({**issue.as_dict(), "model": model_id} for issue in validation.errors)
@@ -273,6 +280,7 @@ def validate_bundle(path: str | Path, *, strict: bool = False) -> BundleCommandR
     errors.extend(issue.as_dict() for issue in validate_bundle_model_backends(inspected.manifest, models))
     if strict:
         errors.extend({**warning, "severity": "error", "promotedByStrict": True} for warning in warnings)
+    warnings = operational_warnings + warnings
     inspection = inspected.as_dict()
     inspection.pop("model_findings", None)
     value = {

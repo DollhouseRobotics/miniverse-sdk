@@ -13,6 +13,7 @@ from typing import Any, Sequence
 
 EXTENSION = "DHR_robotics_rollout"
 MAX_HEIGHTFIELD_SAMPLES = 1024 * 1024
+RECOMMENDED_HEIGHTFIELD_SAMPLES = 512 * 512
 COORDINATE_FRAME = {
     "source": {"handedness": "right", "up": "+Z", "forward": "+X", "units": "m"},
     "target": {"handedness": "right", "up": "+Y", "forward": "+Z", "units": "m"},
@@ -50,6 +51,25 @@ class HeightfieldInspection:
             "outOfBounds": self.out_of_bounds,
             **({"outOfBoundsValue": self.out_of_bounds_value} if self.out_of_bounds_value is not None else {}),
         }
+
+
+def heightfield_size_warnings(width: int, height: int) -> tuple[dict[str, str], ...]:
+    """Return portable-size guidance without weakening the hard validator limit."""
+    samples = width * height
+    if samples <= RECOMMENDED_HEIGHTFIELD_SAMPLES:
+        return ()
+    return ({
+        "code": "large_heightfield",
+        "severity": "warning",
+        "message": (
+            f"heightfield contains {samples} samples; the portable authoring budget is "
+            f"{RECOMMENDED_HEIGHTFIELD_SAMPLES} (512 x 512)"
+        ),
+        "hint": (
+            "Measure browser startup and the intended simulator profile before publishing; "
+            "the 1,048,576-sample acceptance ceiling is not a routinely qualified Isaac fleet size."
+        ),
+    },)
 
 
 def load_height_array(path: str | Path) -> tuple[int, int, list[float]]:

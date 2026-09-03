@@ -18,7 +18,7 @@ from miniverse_sdk.api import Client
 from miniverse_sdk.cli import agent_help, main, parser
 from miniverse_sdk.config import OAuthCredential, credential, delete_oauth_credential, load_oauth_credential, save_oauth_credential
 from miniverse_sdk.onnx_metadata import ONNX_HASH_KEY, ONNX_METADATA_KEY, ONNX_SCHEMA_KEY
-from miniverse_sdk.terrain import build_heightfield_glb, inspect_heightfield_glb
+from miniverse_sdk.terrain import build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb
 
 
 def _varint(value: int) -> bytes:
@@ -372,6 +372,12 @@ class CliTest(unittest.TestCase):
         self.assertNotEqual(malformed, data)
         with self.assertRaisesRegex(TerrainValidationError, "XY resolution must contain"):
             inspect_heightfield_glb(malformed)
+
+    def test_large_heightfields_report_portable_size_guidance(self):
+        self.assertEqual(heightfield_size_warnings(512, 512), ())
+        warnings = heightfield_size_warnings(513, 512)
+        self.assertEqual([warning["code"] for warning in warnings], ["large_heightfield"])
+        self.assertIn("not a routinely qualified Isaac fleet size", warnings[0]["hint"])
 
     def test_operation_lint_names_supporting_simulators_without_capability_declarations(self):
         from miniverse_sdk.onnx_metadata import compatibility_report
