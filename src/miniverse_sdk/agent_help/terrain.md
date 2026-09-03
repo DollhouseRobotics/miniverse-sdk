@@ -29,10 +29,6 @@ The command refuses to overwrite an existing GLB unless `--force` is passed.
 It emits a data-only GLB: Miniverse derives the render mesh, MuJoCo heightfield,
 Isaac collision mesh, and `heightmap_nearest` observations from the same
 embedded float grid. The result is capped at 1,048,576 samples.
-Use at most 262,144 samples (for example, 512 x 512) as the portable authoring
-budget. Larger grids produce a warning and should be published only after
-measuring browser startup and the intended simulator profile. The hard maximum
-is an acceptance ceiling, not a routinely qualified production Isaac size.
 
 Add this exact source declaration to `bundle.json`:
 
@@ -45,8 +41,3 @@ Then pack the GLB at the declared archive path and run
 ID, grid SHA-256, dimensions, origin, XY resolution, scale/offset, and
 out-of-bounds behavior. In policy code, use the same ID with
 `step.sim_queries.heightmap_nearest("climb-001", points)`.
-
-The terrain is static and immutable for the life of a session. Switcher
-commands may select motions or policy-owned variants, but they do not replace
-the environment; a different terrain requires a separate bundle revision and
-session.
