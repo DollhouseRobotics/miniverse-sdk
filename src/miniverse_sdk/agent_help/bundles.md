@@ -1,9 +1,15 @@
 # Bundle validation
 
-A `.mini` archive contains exactly `bundle.json`, `policy.py`, mandatory
-`embodiment/mjcf.zip`, and one or more `models/<id>.onnx` files. Do not put a
+A `.mini` archive contains `bundle.json`, `policy.py`, mandatory
+`embodiment/mjcf.zip`, one or more `models/<id>.onnx` files, and optionally
+`environment/terrain.glb`. Do not put a
 `scene`, `seed`, `robot`, `visual`, `primaryModel`, model providers,
 or model loading policy in `bundle.json`.
+
+Omit `environment` for Miniverse flat ground. To use one static heightfield,
+put `"environment": {"kind": "heightfield"}` in `bundle.json` and generate
+the fixed `environment/terrain.glb` member with `miniverse terrain build`.
+Read `miniverse agent-help terrain` before converting height arrays.
 
 The Python controller declares
 its physics/policy/publication timing, owns randomness, sees all models through
@@ -50,7 +56,7 @@ and statically knowable compatibility. It returns `errors`, `warnings`, and a
 per-model result. Errors always produce exit status 2. Optimization warnings
 produce exit status 0 unless `--strict` promotes them to errors. Server import
 repeats validation over the uploaded bytes and remains authoritative for
-embodiment/scene preprocessing and genuine backend execution. Treat an uploaded
+embodiment/environment preprocessing and genuine backend execution. Treat an uploaded
 bundle as immutable and preserve simulator profile, model, embodiment,
 coordinate-frame, and actuator-order identities.
 

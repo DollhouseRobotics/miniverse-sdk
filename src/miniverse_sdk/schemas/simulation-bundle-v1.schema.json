@@ -17,6 +17,13 @@
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/simulator"}
     },
+    "environment": {
+      "description": "Omit for builtin flat ground. Heightfields use the fixed environment/terrain.glb archive member.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {"kind": {"const": "heightfield"}}
+    },
     "embodiment": {
       "type": "object",
       "additionalProperties": false,
@@ -125,7 +132,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "geometry": {"enum": ["auto", "mjcf", "inertial"]},
+        "geometry": {"description": "auto and mjcf use authored geometry; inertial is an explicit debug-only visualization", "enum": ["auto", "mjcf", "inertial"]},
         "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
         "edge": {
           "type": "object",

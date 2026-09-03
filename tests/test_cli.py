@@ -18,6 +18,7 @@ from miniverse_sdk.api import Client
 from miniverse_sdk.cli import agent_help, main, parser
 from miniverse_sdk.config import OAuthCredential, credential, delete_oauth_credential, load_oauth_credential, save_oauth_credential
 from miniverse_sdk.onnx_metadata import ONNX_HASH_KEY, ONNX_METADATA_KEY, ONNX_SCHEMA_KEY
+from miniverse_sdk.terrain import build_heightfield_glb, inspect_heightfield_glb
 
 
 def _varint(value: int) -> bytes:
@@ -257,6 +258,72 @@ class RefreshHandler(BaseHTTPRequestHandler):
         return self._json({"ok": True})
 
 class CliTest(unittest.TestCase):
+    def test_terrain_build_creates_the_canonical_data_only_grid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            heights = root / "heights.json"
+            output = root / "environment" / "terrain.glb"
+            heights.write_text("[[0, 1, 2], [3, 4, 5]]")
+            self.assertEqual(main([
+                "terrain", "build", str(heights), str(output), "--id", "climb-001",
+                "--cell-size", "0.25", "0.5", "--origin", "-0.25", "1", "0.1",
+                "--vertical-scale", "0.2", "--vertical-offset", "-0.1", "--out-of-bounds", "clamp", "--json",
+            ]), 0)
+            inspected = inspect_heightfield_glb(output.read_bytes())
+            self.assertEqual((inspected.id, inspected.width, inspected.height), ("climb-001", 3, 2))
+            self.assertEqual(inspected.xy_resolution, (0.25, 0.5))
+            self.assertEqual(main(["terrain", "build", str(heights), str(output), "--cell-size", "1", "1"]), 2)
+
+    def test_terrain_build_accepts_a_two_dimensional_numpy_array(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            heights = root / "heights.npy"
+            output = root / "environment" / "terrain.glb"
+            np.save(heights, np.asarray([[0, 0.1], [0.2, 0.3]], dtype=np.float32))
+            self.assertEqual(main([
+                "terrain", "build", str(heights), str(output),
+                "--id", "numpy-grid", "--cell-size", "0.1", "0.2", "--json",
+            ]), 0)
+            inspected = inspect_heightfield_glb(output.read_bytes())
+            self.assertEqual((inspected.width, inspected.height), (2, 2))
+            self.assertEqual(inspected.xy_resolution, (0.1, 0.2))
+
+    def test_bundle_inspection_accepts_only_the_fixed_heightfield_member(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "terrain.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+            manifest["environment"] = {"kind": "heightfield"}
+            values["bundle.json"] = json.dumps(manifest).encode()
+            values["environment/terrain.glb"] = build_heightfield_glb(
+                terrain_id="steps", width=2, height=2, heights=[0, 0, 0.2, 0.2], xy_resolution=[0.1, 0.1], out_of_bounds="clamp",
+            )
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            inspected = inspect_bundle(path)
+            terrain = next(asset for asset in inspected.assets if asset.kind == "scene")
+            self.assertEqual(terrain.path, "environment/terrain.glb")
+            self.assertEqual(terrain.heightfield["id"], "steps")
+
+    def test_heightfield_helpers_fail_with_structured_errors_for_malformed_metadata(self):
+        from miniverse_sdk.terrain import TerrainValidationError
+
+        with self.assertRaisesRegex(TerrainValidationError, "width must be an integer"):
+            build_heightfield_glb(
+                terrain_id="steps", width=2.5, height=2, heights=[0, 0, 0, 0], xy_resolution=[1, 1],
+            )
+        data = build_heightfield_glb(
+            terrain_id="steps", width=2, height=2, heights=[0, 0, 0, 0], xy_resolution=[1, 1],
+        )
+        malformed = data.replace(b'"cellSize":[1.0,1.0]', b'"cellSize":100000000')
+        self.assertNotEqual(malformed, data)
+        with self.assertRaisesRegex(TerrainValidationError, "XY resolution must contain"):
+            inspect_heightfield_glb(malformed)
+
     def test_operation_lint_names_supporting_simulators_without_capability_declarations(self):
         from miniverse_sdk.onnx_metadata import compatibility_report
 

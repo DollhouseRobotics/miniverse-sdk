@@ -25,7 +25,9 @@ Before performing Miniverse work:
 When authoring or diagnosing controller observations:
 
 - Author the canonical archive layout: `bundle.json`, `policy.py`,
-  `embodiment/mjcf.zip`, and `models/<id>.onnx`.
+  `embodiment/mjcf.zip`, `models/<id>.onnx`, and optional
+  `environment/terrain.glb`. Use `miniverse terrain build` for the optional
+  heightfield and read `miniverse agent-help terrain` first.
 
 - Treat `PolicyStep.sim_data` as the simulator-neutral physics snapshot. Read
   contract ordering and static/runtime model values from `sim_data.model`; read

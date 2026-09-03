@@ -19,7 +19,7 @@ MAX_EXPANDED_BYTES = 4 * 1024 * 1024 * 1024
 MAX_ENTRIES = 64
 MAX_COMPRESSION_RATIO = 200
 SIMULATORS = {"mujoco", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"}
-SOURCE_FIELDS = {"version", "id", "name", "description", "primarySimulator", "compatibleSimulators", "embodiment", "models", "program", "commands", "ui", "gizmos", "webModules", "metadata"}
+SOURCE_FIELDS = {"version", "id", "name", "description", "primarySimulator", "compatibleSimulators", "environment", "embodiment", "models", "program", "commands", "ui", "gizmos", "webModules", "metadata"}
 
 
 class BundleValidationError(ValueError):
@@ -36,6 +36,7 @@ class AssetInspection:
     path: str
     sha256: str
     bytes: int
+    heightfield: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,10 @@ class BundleInspection:
 
     def as_dict(self, include_manifest: bool = False) -> dict[str, Any]:
         value = asdict(self)
+        value["assets"] = [
+            {key: item for key, item in asset.items() if item is not None}
+            for asset in value["assets"]
+        ]
         if not include_manifest:
             value.pop("manifest")
             value.pop("program_source")
@@ -230,6 +235,11 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
             if set(model) != {"id"}:
                 raise BundleValidationError("invalid_manifest", f"model {model_id} accepts only id; hashes and providers are derived by Miniverse")
             expected[f"models/{model_id}.onnx"] = "model"
+        environment = manifest.get("environment")
+        if environment is not None:
+            if not isinstance(environment, dict) or environment != {"kind": "heightfield"}:
+                raise BundleValidationError("invalid_manifest", "environment must contain exactly kind=heightfield")
+            expected["environment/terrain.glb"] = "scene"
         undeclared = set(members) - set(expected) - {"bundle.json"}
         missing_assets = set(expected) - set(members)
         if missing_assets:
@@ -242,6 +252,7 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         program_hash = ""
         for archive_name, kind in expected.items():
             actual_hash, size = _sha256_stream(archive, archive_name)
+            heightfield = None
             if kind == "program":
                 program_hash = actual_hash
             if kind == "model":
@@ -254,7 +265,14 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
                 model_precisions[model_id] = scanned.precision
                 if scanned.findings:
                     model_findings[model_id] = scanned.findings
-            assets.append(AssetInspection(kind=kind, path=archive_name, sha256=actual_hash, bytes=size))
+            if kind == "scene":
+                from .terrain import TerrainValidationError, inspect_heightfield_glb
+
+                try:
+                    heightfield = inspect_heightfield_glb(archive.read(archive_name)).as_dict()
+                except TerrainValidationError as error:
+                    raise BundleValidationError("invalid_heightfield", f"{archive_name}: {error}") from error
+            assets.append(AssetInspection(kind=kind, path=archive_name, sha256=actual_hash, bytes=size, heightfield=heightfield))
         try:
             program_source = archive.read("policy.py").decode("utf-8")
         except UnicodeDecodeError as error:
