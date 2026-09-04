@@ -24,7 +24,7 @@ from .config import OAuthCredential, auth_file, auth_store, credential, delete_o
 from .terrain import TerrainValidationError, build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb, load_height_array
 from .validation import ModelValidation, validate_bundle_model_backends, validate_model
 
-TOPICS = {"auth", "bundles", "environments", "upload", "sessions", "onnx", "terrain"}
+TOPICS = {"auth", "bundles", "environments", "mcp", "upload", "sessions", "onnx", "terrain"}
 
 
 @dataclass(frozen=True)

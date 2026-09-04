@@ -1,6 +1,6 @@
 # Miniverse agent guide
 
-You are using `miniverse-sdk` 0.4.3. Miniverse is Dollhouse Robotics'
+You are using `miniverse-sdk` 0.4.4. Miniverse is Dollhouse Robotics'
 cloud-based robotics physics simulation platform.
 
 Start with:
@@ -23,6 +23,7 @@ Read the relevant topic before acting:
 miniverse agent-help auth
 miniverse agent-help bundles
 miniverse agent-help environments
+miniverse agent-help mcp
 miniverse agent-help onnx
 miniverse agent-help terrain
 miniverse agent-help upload

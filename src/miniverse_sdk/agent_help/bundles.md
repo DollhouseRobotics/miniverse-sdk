@@ -19,6 +19,18 @@ its physics/policy/publication timing, owns randomness, sees all models through
 physical actuation in canonical MJCF actuator order. Optional `metadata` is a
 freeform JSON object and has no execution semantics.
 
+## Bundle metadata conventions
+
+- **Name:** Use a simple name for the policy and what it does. Do not include
+  information provided by other metadata or easy to inspect, such as the
+  embodiment.
+- **Description:** Describe the task the policy performs or its purpose. Omit
+  low-level details such as epochs and hyperparameters.
+- **Attributes:** Add all available policy and provenance information, such as
+  the project page, GitHub repository, authors, paper, and license. Manage these
+  web-only references with the Miniverse MCP after upload; they do not change
+  the immutable bundle or its digest.
+
 For a policy-specific spawn/reset, define `initial_state()` on the controller
 and return `ControllerInitialState` with the canonical root body ID, a
 world-frame position, and an XYZW unit quaternion. Do not put reset state in

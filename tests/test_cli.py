@@ -503,6 +503,8 @@ class CliTest(unittest.TestCase):
         help_text = agent_help(None, True)
         self.assertIn("MINIVERSE_API_TOKEN", help_text)
         self.assertIn("object-create event starts server-side", help_text)
+        self.assertIn("https://miniverse.bot/mcp", help_text)
+        self.assertIn("Bundle metadata conventions", help_text)
         self.assertIn(".mini", parser().format_help())
         self.assertIn(".mini", help_text)
         self.assertNotIn(".dhsim", parser().format_help())
