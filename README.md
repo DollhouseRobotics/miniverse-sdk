@@ -34,6 +34,12 @@ Add `"environment": {"kind": "glb", "path": "environment/terrain.glb"}` to
 `miniverse agent-help terrain` for the coordinate-frame, origin, scaling, and
 policy-query contract.
 
+MuJoCo-only bundles may instead declare an MJCF world entrypoint, for example
+`"environment": {"kind": "mjcf", "path": "environment/world.xml"}`. Store
+its exact local include and STL mesh closure as ordinary files under
+`environment/`. Run `miniverse agent-help environments` for the supported
+passive-world subset and fail-closed limitations.
+
 Use 512 x 512 or smaller as the portable terrain budget. The CLI warns above
 that size; the 1,048,576-sample hard limit should be used only after measuring
 the target browser and simulator profile.

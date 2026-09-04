@@ -4,7 +4,8 @@ An environment defines the world around an embodiment. Put the environment
 entrypoint and all of its dependencies under `environment/` in the `.mini`
 archive, then declare the entrypoint in `bundle.json`.
 
-For a GLB environment:
+GLB environments support only canonical data-only heightfields produced by
+`miniverse terrain build`:
 
 ```json
 "environment": {
@@ -22,11 +23,12 @@ For an MJCF environment:
 }
 ```
 
-Paths are safe bundle-relative paths. Keep referenced meshes, textures,
-heightfields, includes, and other source files under `environment/`, and use
-relative references between them. Preserve source coordinate frames, units,
-transforms, joint axes and limits, masses, inertias, collision properties,
-friction, damping, materials, and asset identities.
+Paths are safe bundle-relative paths. Keep referenced includes and STL meshes
+under `environment/`, and use relative references between them. The complete
+subtree must be the entrypoint's dependency closure: missing, unused, escaping,
+case-colliding, or cyclic members fail validation. Preserve source coordinate
+frames, units, transforms, joint axes and limits, masses, inertias, collision
+properties, friction, damping, materials, and asset identities.
 
 Separate the embodiment from the environment by control ownership:
 
@@ -49,19 +51,37 @@ their identities and state namespaces separate. Environment bodies and passive
 joints remain environment state; they are not appended to the robot's actuator
 order.
 
-Choose `primarySimulator` for the authoritative execution target and list only
-the other verified targets in `compatibleSimulators`. Miniverse preprocesses
-the declared environment into immutable, content-addressed artifacts for the
-viewer and each declared simulation backend. MuJoCo uses the validated MJCF
-scene representation, Isaac Sim uses its validated scene representation, and
-the browser viewer uses the derived GLB representation. Policy code remains
-backend-neutral and addresses stable Miniverse body, joint, object, and query
-identities rather than simulator-private handles.
+MJCF environments are supported on all simulation backends. Each backend
+compiles the same environment source independently. Environment body transforms
+stream under `environment:<body-name>` object IDs. Policy code remains
+backend-neutral, and environment joints never enter the embodiment joint or
+actuator order.
+
+Supported MJCF content includes fixed and unactuated passive rigid bodies;
+hinge, slide, ball, and free joints; plane, sphere, capsule, ellipsoid,
+cylinder, box, and STL mesh geoms; native limits, damping, friction, collision
+masks, masses, inertias, defaults, and RGBA materials. The browser uses its own
+camera and lighting.
+
+Put `<compiler>` only in the entrypoint. Its supported attributes are `angle`,
+`meshdir`, `texturedir`, and `autolimits`. `assetdir`, `strippath`, and other
+compiler attributes are rejected. Textures, skins, MJCF heightfields, non-STL
+meshes, actuators, sensors, tendons, equality or explicit contact sections,
+keyframes, custom or global settings, plugins, extensions, flex, deformable,
+composite elements, and other geom types are rejected.
+
+A bundle may contain at most 1,024 ZIP members. An MJCF environment may contain
+at most 4,096 named bodies, 8,192 joints, and 16,384 geoms. Every body must have
+a unique name matching `[A-Za-z0-9][A-Za-z0-9._-]{0,119}` and must remain unique
+when `-` and `.` are replaced with `_`. The browser displays an MJCF plane using
+each positive authored X/Y half-size and substitutes a 20 m half-size for any
+zero axis; physics collision remains an infinite plane.
 
 For a heightfield sourced from a numeric grid, generate the GLB with
 `miniverse terrain build`, declare that generated file as a `glb` environment,
 and read `miniverse agent-help terrain` for its coordinate and query contract.
 
-Run `miniverse bundle validate PATH.mini --json` before upload. Validation
-checks the declared entrypoint, dependency closure, paths, source structure,
-backend compatibility, identities, and environment/embodiment separation.
+Run `miniverse bundle validate PATH.mini --json` before upload. It checks the
+schema, backend declaration, dependency closure, paths, and supported XML
+sections. Upload validation also compiles the environment with MuJoCo and
+checks body identities, count limits, and deterministic browser geometry.

@@ -18,19 +18,23 @@
       "items": {"$ref": "#/$defs/simulator"}
     },
     "environment": {
-      "description": "Omit for builtin flat ground. A GLB environment names its bundle-relative source member.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "path"],
-      "properties": {
-        "kind": {"const": "glb"},
-        "path": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 300,
-          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//).+\\.glb$"
+      "description": "Omit for builtin flat ground. A GLB heightfield or MJCF environment names its bundle-relative source entrypoint.",
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "path"],
+          "properties": {
+            "kind": {"const": "glb"},
+            "path": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^environment/(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*\\\\).+\\.glb$"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "path"],
+          "properties": {
+            "kind": {"const": "mjcf"},
+            "path": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^environment/(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*\\\\).+\\.(?:xml|mjcf)$"}
+          }
         }
-      }
+      ]
     },
     "embodiment": {
       "type": "object",
