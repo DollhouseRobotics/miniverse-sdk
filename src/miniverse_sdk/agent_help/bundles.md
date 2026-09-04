@@ -19,6 +19,20 @@ its physics/policy/publication timing, owns randomness, sees all models through
 physical actuation in canonical MJCF actuator order. Optional `metadata` is a
 freeform JSON object and has no execution semantics.
 
+Bundles use Miniverse's stock camera unless they explicitly declare a viewer
+preference. To change only this bundle's automatic framing, add:
+
+```json
+"viewer": {"camera": {"framingScale": 1.17}}
+```
+
+`framingScale` accepts `0.5` through `3`. `1` is exactly the stock fit, values
+above `1` show more of the scene, and values below `1` show less. The setting
+applies to the initial view, **Reset camera**, generated preview, and public
+embed. It does not change simulation state, terrain, tracking controls, or
+episode resets. Omit `viewer` unless the bundle deliberately needs different
+framing.
+
 ## Bundle metadata conventions
 
 - **Name:** Use a simple name for the policy and what it does. Do not include

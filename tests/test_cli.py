@@ -625,6 +625,28 @@ class CliTest(unittest.TestCase):
             with self.assertRaises(BundleValidationError):
                 inspect_bundle(path)
 
+    def test_bundle_camera_framing_is_an_explicit_bounded_viewer_preference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "camera.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+            manifest["viewer"] = {"camera": {"framingScale": 1.17}}
+            values["bundle.json"] = json.dumps(manifest).encode()
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            self.assertEqual(inspect_bundle(path).manifest["viewer"], {"camera": {"framingScale": 1.17}})
+
+            for invalid in (0.49, 3.01):
+                manifest["viewer"] = {"camera": {"framingScale": invalid}}
+                values["bundle.json"] = json.dumps(manifest).encode()
+                with zipfile.ZipFile(path, "w") as archive:
+                    for name, value in values.items():
+                        archive.writestr(name, value)
+                with self.assertRaises(BundleValidationError):
+                    inspect_bundle(path)
+
     def test_bundled_schemas_match_repository_authorities(self):
         root = Path(__file__).resolve().parents[1]
         bundled = root / "src" / "miniverse_sdk" / "schemas"

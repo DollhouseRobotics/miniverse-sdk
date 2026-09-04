@@ -138,6 +138,27 @@
         }
       }
     },
+    "viewer": {
+      "description": "Optional presentation preferences. Omit this field to use Miniverse's stock viewer settings.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["camera"],
+      "properties": {
+        "camera": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["framingScale"],
+          "properties": {
+            "framingScale": {
+              "description": "Multiplier for automatic camera framing. Values above 1 show more of the scene; 1 preserves the stock framing.",
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 3
+            }
+          }
+        }
+      }
+    },
     "metadata": {"type": "object"}
   },
   "$defs": {

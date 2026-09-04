@@ -22,7 +22,7 @@ MAX_EXPANDED_BYTES = 4 * 1024 * 1024 * 1024
 MAX_ENTRIES = 1024
 MAX_COMPRESSION_RATIO = 200
 SIMULATORS = {"mujoco", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"}
-SOURCE_FIELDS = {"version", "id", "name", "description", "primarySimulator", "compatibleSimulators", "environment", "embodiment", "models", "program", "commands", "ui", "gizmos", "webModules", "metadata"}
+SOURCE_FIELDS = {"version", "id", "name", "description", "primarySimulator", "compatibleSimulators", "environment", "embodiment", "models", "program", "commands", "ui", "gizmos", "webModules", "viewer", "metadata"}
 MJCF_ENVIRONMENT_BODY_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}")
 
 
