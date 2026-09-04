@@ -4,7 +4,8 @@ An environment defines the world around an embodiment. Put the environment
 entrypoint and all of its dependencies under `environment/` in the `.mini`
 archive, then declare the entrypoint in `bundle.json`.
 
-For a GLB environment:
+GLB environments support only canonical data-only heightfields produced by
+`miniverse terrain build`:
 
 ```json
 "environment": {
@@ -50,26 +51,36 @@ their identities and state namespaces separate. Environment bodies and passive
 joints remain environment state; they are not appended to the robot's actuator
 order.
 
-The current MJCF environment slice is MuJoCo-only: set `primarySimulator` to
-`mujoco` and do not list either Isaac profile in `compatibleSimulators`.
-Miniverse preserves the validated MJCF closure for MuJoCo and derives a
-separate immutable GLB for the browser. Environment body transforms stream
-under `environment:<body-name>` object IDs. Policy code remains backend-neutral
-and environment joints never enter the embodiment actuator order.
+For an MJCF environment, set `primarySimulator` to `mujoco` and do not list
+either Isaac profile in `compatibleSimulators`. Environment body transforms
+stream under `environment:<body-name>` object IDs. Policy code remains
+backend-neutral, and environment joints never enter the embodiment joint or
+actuator order.
 
-Supported MJCF environment physics includes fixed and unactuated passive rigid
-bodies; hinge, slide, ball, and free joints; primitive geoms; and STL meshes.
-Textures, skins, MJCF heightfields, non-STL meshes, actuators, sensors, tendons,
-equality/contact reference sections, keyframes, custom/global settings,
-plugins/extensions, flex/deformable/composite elements, and unsupported geom
-types fail closed. Use the canonical GLB heightfield contract for terrain.
-Passive-joint policy queries, MJCF-environment rollout GLB export, and Isaac MJCF
-environment conversion are not yet supported.
+Supported MJCF content includes fixed and unactuated passive rigid bodies;
+hinge, slide, ball, and free joints; plane, sphere, capsule, ellipsoid,
+cylinder, box, and STL mesh geoms; native limits, damping, friction, collision
+masks, masses, inertias, defaults, and RGBA materials. MJCF lights and cameras
+are accepted by MuJoCo, but the browser uses its own camera and lighting.
+
+Put `<compiler>` only in the entrypoint. Its supported attributes are `angle`,
+`meshdir`, `texturedir`, and `autolimits`. `assetdir`, `strippath`, and other
+compiler attributes are rejected. Textures, skins, MJCF heightfields, non-STL
+meshes, actuators, sensors, tendons, equality or explicit contact sections,
+keyframes, custom or global settings, plugins, extensions, flex, deformable,
+composite elements, and other geom types are rejected.
+
+A bundle may contain at most 1,024 ZIP members. An MJCF environment may contain
+at most 4,096 named bodies, 8,192 joints, and 16,384 geoms. Every body must have
+a unique name matching `[A-Za-z0-9][A-Za-z0-9._-]{0,119}`. The browser displays
+an MJCF plane using each positive authored X/Y half-size and substitutes a 20 m
+half-size for any zero axis; MuJoCo collision remains an infinite plane.
 
 For a heightfield sourced from a numeric grid, generate the GLB with
 `miniverse terrain build`, declare that generated file as a `glb` environment,
 and read `miniverse agent-help terrain` for its coordinate and query contract.
 
-Run `miniverse bundle validate PATH.mini --json` before upload. Validation
-checks the declared entrypoint, dependency closure, paths, source structure,
-backend compatibility, identities, and environment/embodiment separation.
+Run `miniverse bundle validate PATH.mini --json` before upload. It checks the
+schema, backend declaration, dependency closure, paths, and supported XML
+sections. Upload validation also compiles the environment with MuJoCo and
+checks body identities, count limits, and deterministic browser geometry.
