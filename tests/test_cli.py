@@ -597,6 +597,32 @@ class CliTest(unittest.TestCase):
                     archive.writestr(name, value)
             self.assertEqual(main(["bundle", "validate", str(path), "--json"]), 2)
 
+    def test_episode_restart_commands_are_discrete_and_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "tracker.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+            command = {
+                "id": "case", "kind": "scalar", "default": [0],
+                "range": [0, 2], "step": 1, "frame": "selection",
+                "sliceLength": 1, "update": "on-release", "restart": "episode",
+            }
+            manifest["commands"] = [command]
+            values["bundle.json"] = json.dumps(manifest).encode()
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            self.assertEqual(inspect_bundle(path).manifest["commands"][0]["restart"], "episode")
+
+            manifest["commands"] = [{**command, "update": "continuous"}]
+            values["bundle.json"] = json.dumps(manifest).encode()
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            with self.assertRaises(BundleValidationError):
+                inspect_bundle(path)
+
     def test_bundled_schemas_match_repository_authorities(self):
         root = Path(__file__).resolve().parents[1]
         bundled = root / "src" / "miniverse_sdk" / "schemas"

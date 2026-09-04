@@ -23,6 +23,15 @@ For a policy-specific spawn/reset, define `initial_state()` on the controller
 and return `ControllerInitialState` with the canonical root body ID, a
 world-frame position, and an XYZW unit quaternion. Do not put reset state in
 `bundle.json`; without the hook Miniverse uses the MJCF's compiled default pose.
+
+To start a new episode when a command changes, set `"restart": "episode"` on
+that command. Its `update` must be `"on-release"` or `"edge"`, not
+`"continuous"`. Define `reset_state(commands)` to choose the new episode's
+`ControllerInitialState` from the current command values. Miniverse calls it
+after `initialize(context)`. Without `reset_state(commands)`, Miniverse uses
+`initial_state()`. **Reset simulation** follows the same behavior with the
+current command values; **Reset camera** does not reset the policy or episode.
+
 Miniverse also derives rendering-only visuals from the included MJCF and
 `embodiment.appearance.geometry`; do not include visual bytes yourself.
 MJCF geoms may be both visible and collision-active. Authors can add
