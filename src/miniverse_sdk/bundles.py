@@ -23,6 +23,7 @@ MAX_ENTRIES = 1024
 MAX_COMPRESSION_RATIO = 200
 SIMULATORS = {"mujoco", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"}
 SOURCE_FIELDS = {"version", "id", "name", "description", "primarySimulator", "compatibleSimulators", "environment", "embodiment", "models", "program", "commands", "ui", "gizmos", "webModules", "metadata"}
+MJCF_ENVIRONMENT_BODY_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}")
 
 
 class BundleValidationError(ValueError):
@@ -265,6 +266,9 @@ def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.Zip
 
 def _validate_environment_mjcf(compiled: bytes) -> None:
     rejected_tags = {"actuator", "sensor", "tendon", "equality", "contact", "keyframe", "custom", "option", "size", "statistic", "extension", "plugin", "deformable", "flex", "composite"}
+    counts = {"body": 0, "joint": 0, "geom": 0}
+    body_names: set[str] = set()
+    portable_body_names: set[str] = set()
     with zipfile.ZipFile(io.BytesIO(compiled)) as source:
         for name in source.namelist():
             if PurePosixPath(name).suffix.lower() not in {".xml", ".mjcf"}:
@@ -278,6 +282,20 @@ def _validate_environment_mjcf(compiled: bytes) -> None:
             for mesh in root.iter("mesh"):
                 if mesh.get("file") and PurePosixPath(str(mesh.get("file"))).suffix.lower() != ".stl":
                     raise BundleValidationError("unsupported_environment", "MJCF environment meshes must use STL in v1")
+            counts["body"] += sum(1 for _ in root.iter("body"))
+            counts["joint"] += sum(1 for element in root.iter() if element.tag in {"joint", "freejoint"})
+            counts["geom"] += sum(1 for _ in root.iter("geom"))
+            for body in root.iter("body"):
+                body_name = str(body.get("name", ""))
+                if not MJCF_ENVIRONMENT_BODY_NAME.fullmatch(body_name) or body_name in body_names:
+                    raise BundleValidationError("unsupported_environment", "every MJCF environment body must have a unique stable name")
+                portable_name = body_name.replace("-", "_").replace(".", "_")
+                if portable_name in portable_body_names:
+                    raise BundleValidationError("unsupported_environment", "MJCF environment body names must remain unique after replacing '-' and '.' with '_'")
+                body_names.add(body_name)
+                portable_body_names.add(portable_name)
+    if counts["body"] > 4096 or counts["joint"] > 8192 or counts["geom"] > 16384:
+        raise BundleValidationError("unsupported_environment", "MJCF environment exceeds the supported body, joint, or geom count")
 
 
 def _safe_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
