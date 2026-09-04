@@ -8,6 +8,15 @@ description: Work with Dollhouse Robotics Miniverse simulation bundles. Use for 
 Miniverse is Dollhouse Robotics' cloud-based robotics physics simulation
 platform.
 
+Miniverse is under active development. Treat this skill as a compact routing
+guide, not a frozen or exhaustive API specification: the website, published
+`miniverse-sdk`, repository, and hosted service may briefly be at different
+revisions. Refresh the SDK before each task and use that installed CLI's
+`agent-help`, schemas, and errors as the authority for the version actually in
+use. If the newest release still appears behind the service or repository,
+report the exact CLI version and mismatch; do not guess or silently mix
+instructions from different revisions.
+
 Before performing Miniverse work:
 
 1. Require `uv`; if it is unavailable, stop and explain that the supported
