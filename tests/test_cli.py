@@ -10,6 +10,7 @@ import tempfile
 import threading
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -257,6 +258,60 @@ class RefreshHandler(BaseHTTPRequestHandler):
         if self.headers.get("authorization") != "Bearer access-2":
             return self._json({"error": "expired", "code": "access_required"}, 401)
         return self._json({"ok": True})
+
+
+class TokenHandler(BaseHTTPRequestHandler):
+    tokens = []
+
+    def log_message(self, *_args):
+        pass
+
+    def _json(self, value, status=200):
+        body = json.dumps(value).encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authenticated(self):
+        if self.headers.get("authorization") == "Bearer test-token":
+            return True
+        self._json({"error": "unauthorized", "code": "access_required"}, 401)
+        return False
+
+    def do_POST(self):
+        if not self._authenticated():
+            return
+        length = int(self.headers.get("content-length", "0"))
+        value = json.loads(self.rfile.read(length) or b"{}")
+        if self.path != "/api/v1/tokens":
+            return self._json({"error": "not found"}, 404)
+        token = {
+            "id": f"mvt_{len(TokenHandler.tokens) + 1:032x}",
+            "name": value.get("name"),
+            "createdAt": 1_700_000_000_000,
+        }
+        TokenHandler.tokens.append(token)
+        return self._json({**token, "token": "mv_pat_" + "a" * 43}, 201)
+
+    def do_GET(self):
+        if not self._authenticated():
+            return
+        if self.path == "/api/v1/tokens":
+            return self._json({"tokens": TokenHandler.tokens})
+        return self._json({"error": "not found"}, 404)
+
+    def do_DELETE(self):
+        if not self._authenticated():
+            return
+        prefix = "/api/v1/tokens/"
+        if not self.path.startswith(prefix):
+            return self._json({"error": "not found"}, 404)
+        token_id = self.path[len(prefix):]
+        before = len(TokenHandler.tokens)
+        TokenHandler.tokens = [token for token in TokenHandler.tokens if token["id"] != token_id]
+        return self._json({"ok": True, "id": token_id}, 200 if len(TokenHandler.tokens) < before else 404)
 
 class CliTest(unittest.TestCase):
     def test_terrain_build_creates_the_canonical_data_only_grid(self):
@@ -599,6 +654,37 @@ class CliTest(unittest.TestCase):
     def test_environment_token_is_the_noninteractive_auth_contract(self):
         with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "environment-token"}, clear=False):
             self.assertEqual(credential(), ("environment-token", "MINIVERSE_API_TOKEN"))
+
+    def test_personal_token_create_list_and_delete_commands(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), TokenHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        TokenHandler.tokens = []
+        origin = f"http://127.0.0.1:{server.server_port}"
+        try:
+            with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "test-token"}, clear=False):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(main(["--origin", origin, "token", "create", "--name", "remote gpu", "--json"]), 0)
+                created = json.loads(output.getvalue())
+                self.assertEqual(created["name"], "remote gpu")
+                self.assertRegex(created["token"], r"^mv_pat_[A-Za-z0-9_-]{43}$")
+
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(main(["--origin", origin, "token", "list", "--json"]), 0)
+                listed = json.loads(output.getvalue())
+                self.assertEqual(listed["tokens"], [{key: created[key] for key in ("id", "name", "createdAt")}])
+
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(main(["--origin", origin, "token", "delete", created["id"], "--json"]), 0)
+                self.assertEqual(json.loads(output.getvalue()), {"ok": True, "id": created["id"]})
+                self.assertEqual(TokenHandler.tokens, [])
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
 
     def test_oauth_file_is_private_and_refresh_rotation_is_persisted(self):
         with tempfile.TemporaryDirectory() as directory:
