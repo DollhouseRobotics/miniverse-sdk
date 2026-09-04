@@ -23,6 +23,14 @@ For a policy-specific spawn/reset, define `initial_state()` on the controller
 and return `ControllerInitialState` with the canonical root body ID, a
 world-frame position, and an XYZW unit quaternion. Do not put reset state in
 `bundle.json`; without the hook Miniverse uses the MJCF's compiled default pose.
+For a discrete command that begins a new episode when its value changes, add
+`"restart":"episode"` to the command and use `update: "on-release"` or
+`"edge"`. Define `reset_state(commands)` to return the selected episode's
+`ControllerInitialState`; if that hook is absent, Miniverse reuses
+`initial_state()`. The reset hook runs after `initialize(context)`, so large
+reset tables can remain in a declared model instead of `policy.py`. This is
+command lifecycle, independent of any switcher, motion, terrain, or task
+semantics.
 Miniverse also derives rendering-only visuals from the included MJCF and
 `embodiment.appearance.geometry`; do not include visual bytes yourself.
 MJCF geoms may be both visible and collision-active. Authors can add
