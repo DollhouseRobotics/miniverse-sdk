@@ -51,17 +51,19 @@ their identities and state namespaces separate. Environment bodies and passive
 joints remain environment state; they are not appended to the robot's actuator
 order.
 
-For an MJCF environment, set `primarySimulator` to `mujoco` and do not list
-either Isaac profile in `compatibleSimulators`. Environment body transforms
-stream under `environment:<body-name>` object IDs. Policy code remains
-backend-neutral, and environment joints never enter the embodiment joint or
-actuator order.
+MJCF environments support `mujoco`, `isaac-sim-cpu-physx`, and
+`isaac-sim-gpu-physx` as the primary simulator or as compatible simulators.
+Each backend compiles the same environment source independently. Environment
+body transforms stream under `environment:<body-name>` object IDs. Policy code
+remains backend-neutral, and environment joints never enter the embodiment
+joint or actuator order.
 
-Supported MJCF content includes fixed and unactuated passive rigid bodies;
-hinge, slide, ball, and free joints; plane, sphere, capsule, ellipsoid,
-cylinder, box, and STL mesh geoms; native limits, damping, friction, collision
-masks, masses, inertias, defaults, and RGBA materials. MJCF lights and cameras
-are accepted by MuJoCo, but the browser uses its own camera and lighting.
+Supported MJCF content across MuJoCo and Isaac includes fixed and unactuated
+passive rigid bodies; hinge, slide, ball, and free joints; plane, sphere,
+capsule, ellipsoid, cylinder, box, and STL mesh geoms; native limits, damping,
+friction, collision masks, masses, inertias, defaults, and RGBA materials. MJCF
+lights and cameras are accepted by MuJoCo, but the browser uses its own camera
+and lighting.
 
 Put `<compiler>` only in the entrypoint. Its supported attributes are `angle`,
 `meshdir`, `texturedir`, and `autolimits`. `assetdir`, `strippath`, and other
@@ -72,9 +74,11 @@ composite elements, and other geom types are rejected.
 
 A bundle may contain at most 1,024 ZIP members. An MJCF environment may contain
 at most 4,096 named bodies, 8,192 joints, and 16,384 geoms. Every body must have
-a unique name matching `[A-Za-z0-9][A-Za-z0-9._-]{0,119}`. The browser displays
-an MJCF plane using each positive authored X/Y half-size and substitutes a 20 m
-half-size for any zero axis; MuJoCo collision remains an infinite plane.
+a unique name matching `[A-Za-z0-9][A-Za-z0-9._-]{0,119}`; names must also stay
+unique when `-` and `.` are normalized to `_` for Isaac USD identifiers. The
+browser displays an MJCF plane using each positive authored X/Y half-size and
+substitutes a 20 m half-size for any zero axis; physics collision remains an
+infinite plane.
 
 For a heightfield sourced from a numeric grid, generate the GLB with
 `miniverse terrain build`, declare that generated file as a `glb` environment,

@@ -364,6 +364,8 @@ class CliTest(unittest.TestCase):
             with zipfile.ZipFile(path, "r") as archive:
                 values = {name: archive.read(name) for name in archive.namelist()}
             manifest = json.loads(values["bundle.json"])
+            manifest["primarySimulator"] = "isaac-sim-cpu-physx"
+            manifest["compatibleSimulators"] = ["mujoco", "isaac-sim-gpu-physx"]
             manifest["environment"] = {"kind": "mjcf", "path": "environment/world.xml"}
             values["bundle.json"] = json.dumps(manifest).encode()
             values["environment/world.xml"] = b'<mujoco><include file="parts/swing.xml"/><worldbody><geom type="plane" size="5 5 .1"/></worldbody></mujoco>'

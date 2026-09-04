@@ -396,8 +396,6 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
                     raise BundleValidationError("invalid_manifest", "environment.path collides with a reserved bundle member")
                 expected[environment_path] = "scene"
             else:
-                if simulator != "mujoco" or any(str(value).startswith("isaac-sim-") for value in compatible):
-                    raise BundleValidationError("unsupported_environment", "MJCF environments currently require a MuJoCo-only bundle")
                 environment_path, compiled_environment = _compile_embodiment(archive, members, environment, subtree="environment")
                 _validate_environment_mjcf(compiled_environment)
                 environment_members = {name for name in members if name.startswith("environment/")}
