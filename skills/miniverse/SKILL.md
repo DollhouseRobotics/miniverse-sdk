@@ -66,8 +66,11 @@ When authoring or diagnosing controller observations:
   rule explicit. Use `heightSamples` for live collision raycasts.
 
 Prefer `miniverse auth login` for a long-lived agent workspace; the installed
-CLI retains and refreshes that authorization automatically. Persist the CLI
-state directory when the agent itself is ephemeral. Use `MINIVERSE_API_TOKEN`
-for CI or intentionally non-interactive authentication. Never print, persist,
-or pass that environment token as a command-line argument. Treat upload, import
-readiness, and publication as separate claims.
+CLI retains and refreshes that authorization automatically. For CI, remote
+environments, and ephemeral machines, prefer creating a named personal token
+with `miniverse token create` from a trusted authenticated workspace, then put
+its one-time value directly into the destination secret manager as
+`MINIVERSE_API_TOKEN`. Delete it with `miniverse token delete` when that
+environment no longer needs access. Never print, persist in repository files,
+or pass that environment token as a command-line argument. Treat upload,
+import readiness, and publication as separate claims.

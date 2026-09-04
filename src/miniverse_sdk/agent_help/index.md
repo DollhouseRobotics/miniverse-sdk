@@ -1,6 +1,6 @@
 # Miniverse agent guide
 
-You are using `miniverse-sdk` 0.4.1. Miniverse is Dollhouse Robotics'
+You are using `miniverse-sdk` 0.4.2. Miniverse is Dollhouse Robotics'
 cloud-based robotics physics simulation platform.
 
 Start with:
@@ -10,9 +10,12 @@ miniverse version --json
 miniverse auth status --json
 miniverse bundle validate PATH.mini --json
 ```
-Use `miniverse auth login` once for a persistent agent workspace; the CLI
-refreshes that grant automatically. Use `MINIVERSE_API_TOKEN` for CI. Never
-print credentials or signed transfer URLs.
+Use `miniverse auth login` once for a trusted persistent agent workspace; the
+CLI refreshes that grant automatically. For CI, remote environments, and
+ephemeral machines, create a personal token with `miniverse token create` and
+provide it through `MINIVERSE_API_TOKEN`. Never print credentials or signed
+transfer URLs except for capturing a newly created token directly into a secret
+manager.
 
 Read the relevant topic before acting:
 

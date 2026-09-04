@@ -12,15 +12,25 @@ uv tool install miniverse-sdk
 miniverse agent-help
 ```
 
-Use `MINIVERSE_API_TOKEN` for CI authentication, or run:
+For a trusted persistent workspace, run:
 
 ```bash
 miniverse auth login
 ```
 
 Interactive access and refresh tokens are stored in a user-only file and
-renewed automatically. On ephemeral Linux agents, persist
+renewed automatically. On persistent Linux agents, the state is under
 `$XDG_STATE_HOME/miniverse`, or `~/.local/state/miniverse`.
+
+For CI, remote environments, and ephemeral machines, create a personal token
+from an authenticated workspace and place its one-time value in the remote
+secret manager as `MINIVERSE_API_TOKEN`:
+
+```bash
+miniverse token create --name "gpu-runner" --json
+miniverse token list --json
+miniverse token delete TOKEN_ID --json
+```
 
 ## Heightfield terrain
 

@@ -54,7 +54,7 @@ def auth_login(args: argparse.Namespace) -> dict[str, Any]:
     client = Client(api_origin, None)
     created = client.request_form("/api/auth/device/code", {
         "client_id": "miniverse-cli",
-        "scope": "openid profile email offline_access bundles:read bundles:upload bundles:publish",
+        "scope": "openid profile email offline_access bundles:read bundles:upload bundles:publish tokens:manage",
         "resource": api_origin,
     })
     verification = str(created.get("verification_uri_complete") or created.get("verification_uri") or "")
@@ -183,6 +183,15 @@ def parser() -> argparse.ArgumentParser:
     login = auth_commands.add_parser("login")
     login.add_argument("--no-browser", action="store_true")
     for leaf in (login, auth_commands.add_parser("status"), auth_commands.add_parser("logout")):
+        leaf.add_argument("--json", action="store_true", dest="command_json")
+    token = commands.add_parser("token", help="Manage personal API tokens")
+    token_commands = token.add_subparsers(dest="token_command", required=True)
+    token_create = token_commands.add_parser("create", help="Create a personal API token")
+    token_create.add_argument("--name", help="Optional name describing where the token will be used")
+    token_list = token_commands.add_parser("list", help="List personal API tokens")
+    token_delete = token_commands.add_parser("delete", help="Delete a personal API token")
+    token_delete.add_argument("token_id", help="Token ID returned by create or list")
+    for leaf in (token_create, token_list, token_delete):
         leaf.add_argument("--json", action="store_true", dest="command_json")
     bundle = commands.add_parser("bundle")
     bundle_commands = bundle.add_subparsers(dest="bundle_command", required=True)
@@ -327,6 +336,15 @@ def run(args: argparse.Namespace) -> Any:
                 **({"path": str(auth_file())} if auth_store() == "file" else {}),
             } if saved and source == "oauth" else {}),
         }
+    if args.command == "token":
+        api_origin = origin(args.origin)
+        saved, _ = credential(api_origin)
+        client = Client(api_origin, saved)
+        if args.token_command == "create":
+            return client.request("/api/v1/tokens", {"name": args.name} if args.name is not None else {})
+        if args.token_command == "list":
+            return client.request("/api/v1/tokens")
+        return client.request(f"/api/v1/tokens/{urllib.parse.quote(args.token_id, safe='')}", method="DELETE")
     if args.command == "model":
         path = Path(args.model)
         return _model_result(validate_model(path), strict=args.strict, model_id=path.stem)
