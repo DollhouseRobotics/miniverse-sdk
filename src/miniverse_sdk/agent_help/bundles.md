@@ -65,6 +65,18 @@ physics-neutral custom visuals with `contype="0" conaffinity="0" mass="0"`
 without changing the bundle schema or simulation dynamics. Author visual `pos`,
 `quat`, and `fromto` values in the MJCF source frame.
 
+Declare spatial tendons in the embodiment MJCF. The viewer renders tendons
+whose routes consist entirely of sites as straight segments connecting those
+sites in declaration order. Each site is an attachment or routing point fixed
+in its owning body's local frame; its displayed position follows that body's
+pose. The visual preserves the compiled MJCF `width` and `rgba`.
+
+Tendon visualization supports site-only spatial routes. Routes containing
+wrapping geoms or pulleys, and fixed tendons defined by joint coefficients, are
+not rendered. This limitation concerns visualization, not the tendon physics
+supported by the selected simulation backend. The visual represents the tendon
+path, not individual chain links or a deformable pipe mesh.
+
 Author actuator gains, control/force ranges, and Miniverse's namespaced
 actuator velocity-limit numeric directly in the embodiment MJCF. Use
 `embodiment.bodyDynamicsOverrides` only for exact named-body linear/angular
