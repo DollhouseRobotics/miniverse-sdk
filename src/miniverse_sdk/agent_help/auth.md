@@ -16,6 +16,11 @@ secret manager and expose it to Miniverse commands as `MINIVERSE_API_TOKEN`.
 Do not pass it as an argument, write it into repository files, or include it in
 logs. `MINIVERSE_API_TOKEN` takes precedence over an OAuth credential.
 
+Personal API tokens do not expire; deleting a token revokes it. Do not put an
+OAuth access token in `MINIVERSE_API_TOKEN`. The CLI treats this variable as a
+static bearer token and cannot refresh it. If it contains an expired access
+token, unset it to use your saved renewable login.
+
 List token metadata or delete a token from any authenticated workspace:
 
 ```bash

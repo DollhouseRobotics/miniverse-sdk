@@ -16,9 +16,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from miniverse_sdk.bundles import BundleValidationError, _validate_environment_mjcf, inspect_bundle
-from miniverse_sdk.api import Client
+from miniverse_sdk.api import ApiError, Client
 from miniverse_sdk.cli import agent_help, main, parser
-from miniverse_sdk.config import OAuthCredential, credential, delete_oauth_credential, load_oauth_credential, save_oauth_credential
+from miniverse_sdk.config import OAuthCredential, credential, credential_lock, delete_oauth_credential, load_oauth_credential, save_oauth_credential
 from miniverse_sdk.onnx_metadata import ONNX_HASH_KEY, ONNX_METADATA_KEY, ONNX_SCHEMA_KEY
 from miniverse_sdk.terrain import build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb
 
@@ -742,6 +742,160 @@ class CliTest(unittest.TestCase):
                 server.shutdown()
                 thread.join()
                 server.server_close()
+
+    def test_oauth_refreshes_within_expiry_skew_and_saves_rotated_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api_origin = "https://refresh.example"
+            path = Path(directory) / "auth.json"
+            saved = OAuthCredential(
+                access_token="access-1",
+                refresh_token="refresh-1",
+                expires_at=1_059,
+                origin=api_origin,
+            )
+            with patch.dict(os.environ, {
+                "MINIVERSE_AUTH_FILE": str(path),
+                "MINIVERSE_AUTH_STORE": "file",
+                "MINIVERSE_API_TOKEN": "",
+            }, clear=False), patch("miniverse_sdk.api.time.time", return_value=1_000):
+                save_oauth_credential(saved)
+                client = Client(api_origin, saved)
+                with patch.object(client, "request_form", return_value={
+                    "access_token": "access-2",
+                    "refresh_token": "refresh-2",
+                    "expires_in": 3_600,
+                }) as refresh, patch.object(client, "_request_once", return_value={"ok": True}) as request:
+                    self.assertEqual(client.request("/protected"), {"ok": True})
+
+                refresh.assert_called_once()
+                self.assertEqual(request.call_args.args[2]["authorization"], "Bearer access-2")
+                self.assertEqual(load_oauth_credential(api_origin), OAuthCredential(
+                    access_token="access-2",
+                    refresh_token="refresh-2",
+                    expires_at=4_600,
+                    origin=api_origin,
+                ))
+
+    def test_oauth_refresh_lock_reloads_a_newer_saved_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api_origin = "https://refresh.example"
+            path = Path(directory) / "auth.json"
+            stale = OAuthCredential(
+                access_token="stale-access",
+                refresh_token="stale-refresh",
+                expires_at=1_000,
+                origin=api_origin,
+            )
+            newer = OAuthCredential(
+                access_token="newer-access",
+                refresh_token="newer-refresh",
+                expires_at=5_000,
+                origin=api_origin,
+            )
+            with patch.dict(os.environ, {
+                "MINIVERSE_AUTH_FILE": str(path),
+                "MINIVERSE_AUTH_STORE": "file",
+                "MINIVERSE_API_TOKEN": "",
+            }, clear=False), patch("miniverse_sdk.api.time.time", return_value=1_000):
+                save_oauth_credential(newer)
+                client = Client(api_origin, stale)
+                with patch("miniverse_sdk.api.credential_lock", wraps=credential_lock) as lock, patch.object(
+                    client, "request_form"
+                ) as refresh, patch.object(
+                    client, "_request_once", return_value={"ok": True}
+                ) as request:
+                    self.assertEqual(client.request("/protected"), {"ok": True})
+
+                lock.assert_called_once_with()
+                refresh.assert_not_called()
+                self.assertEqual(client.credential, newer)
+                self.assertEqual(request.call_args.args[2]["authorization"], "Bearer newer-access")
+
+    def test_transient_refresh_failure_preserves_saved_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api_origin = "https://refresh.example"
+            path = Path(directory) / "auth.json"
+            saved = OAuthCredential(
+                access_token="access-1",
+                refresh_token="refresh-1",
+                expires_at=1_000,
+                origin=api_origin,
+            )
+            with patch.dict(os.environ, {
+                "MINIVERSE_AUTH_FILE": str(path),
+                "MINIVERSE_AUTH_STORE": "file",
+                "MINIVERSE_API_TOKEN": "",
+            }, clear=False), patch("miniverse_sdk.api.time.time", return_value=1_000):
+                save_oauth_credential(saved)
+                client = Client(api_origin, saved)
+                with patch.object(client, "request_form", side_effect=ApiError(503, "temporarily unavailable")):
+                    with self.assertRaises(ApiError) as caught:
+                        client.request("/protected")
+
+                self.assertEqual(caught.exception.status, 503)
+                self.assertEqual(load_oauth_credential(api_origin), saved)
+
+    def test_renewable_credentials_retry_a_401_only_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api_origin = "https://refresh.example"
+            path = Path(directory) / "auth.json"
+            saved = OAuthCredential(
+                access_token="access-1",
+                refresh_token="refresh-1",
+                expires_at=5_000,
+                origin=api_origin,
+            )
+            unauthorized = ApiError(401, "expired", "access_required")
+            with patch.dict(os.environ, {
+                "MINIVERSE_AUTH_FILE": str(path),
+                "MINIVERSE_AUTH_STORE": "file",
+                "MINIVERSE_API_TOKEN": "",
+            }, clear=False), patch("miniverse_sdk.api.time.time", return_value=1_000):
+                save_oauth_credential(saved)
+                client = Client(api_origin, saved)
+                with patch.object(client, "request_form", return_value={
+                    "access_token": "access-2",
+                    "refresh_token": "refresh-2",
+                    "expires_in": 3_600,
+                }) as refresh, patch.object(client, "_request_once", side_effect=[unauthorized, unauthorized]) as request:
+                    with self.assertRaises(ApiError) as caught:
+                        client.request("/protected")
+
+                self.assertIs(caught.exception, unauthorized)
+                self.assertEqual(request.call_count, 2)
+                refresh.assert_called_once()
+                self.assertEqual(request.call_args_list[1].args[2]["authorization"], "Bearer access-2")
+
+    def test_environment_token_takes_precedence_and_is_not_renewed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api_origin = "https://refresh.example"
+            path = Path(directory) / "auth.json"
+            saved = OAuthCredential(
+                access_token="oauth-access",
+                refresh_token="oauth-refresh",
+                expires_at=0,
+                origin=api_origin,
+            )
+            with patch.dict(os.environ, {
+                "MINIVERSE_AUTH_FILE": str(path),
+                "MINIVERSE_AUTH_STORE": "file",
+                "MINIVERSE_API_TOKEN": "environment-token",
+            }, clear=False):
+                save_oauth_credential(saved)
+                selected, source = credential(api_origin)
+                client = Client(api_origin, selected)
+                with patch.object(client, "_request_once", side_effect=ApiError(401, "unauthorized")) as request, patch.object(
+                    client, "request_form"
+                ) as refresh:
+                    with self.assertRaises(ApiError):
+                        client.request("/protected")
+
+                self.assertEqual(source, "MINIVERSE_API_TOKEN")
+                self.assertFalse(client.credential.renewable)
+                self.assertEqual(request.call_count, 1)
+                self.assertEqual(request.call_args.args[2]["authorization"], "Bearer environment-token")
+                refresh.assert_not_called()
+                self.assertEqual(load_oauth_credential(api_origin), saved)
 
     def test_file_store_does_not_read_legacy_keyring_tokens(self):
         with tempfile.TemporaryDirectory() as directory:
