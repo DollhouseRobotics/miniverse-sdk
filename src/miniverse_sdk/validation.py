@@ -18,7 +18,7 @@ from .onnx_metadata import ONNX_HASH_KEY, compatibility_report
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
 MAX_TENSOR_ELEMENTS = 16 * 1024 * 1024
 ALLOWED_ONNX_DOMAINS = {"", "ai.onnx", "ai.onnx.ml"}
-SOURCE_TO_CONTRACT_BACKEND = {"mujoco": "mujoco-cpu"}
+SOURCE_TO_CONTRACT_BACKEND = {"mujoco": "mujoco-cpu", "browser-mujoco": "mujoco-cpu"}
 
 
 @dataclass(frozen=True)

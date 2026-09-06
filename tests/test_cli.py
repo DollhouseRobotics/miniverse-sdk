@@ -585,6 +585,16 @@ class CliTest(unittest.TestCase):
             path = fixture(Path(directory) / "legacy.dhsim")
             self.assertEqual(inspect_bundle(path).bundle_id, "fixture")
 
+    def test_browser_mujoco_bundle_validates_against_mujoco_model_backend(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "browser.mini", primary_simulator="browser-mujoco")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["bundle", "validate", str(path), "--json"]), 0)
+            result = json.loads(output.getvalue())
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["primary_simulator"], "browser-mujoco")
+
     def test_bundle_rejects_removed_policy_bindings(self):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(Path(directory) / "legacy.mini", legacy_policy_bindings=True)

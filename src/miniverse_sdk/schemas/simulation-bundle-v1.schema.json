@@ -162,7 +162,7 @@
     "metadata": {"type": "object"}
   },
   "$defs": {
-    "simulator": {"enum": ["mujoco", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"]},
+    "simulator": {"enum": ["mujoco", "browser-mujoco", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"]},
     "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
     "appearance": {
       "type": "object",

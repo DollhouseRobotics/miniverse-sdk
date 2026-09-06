@@ -19,6 +19,10 @@ its physics/policy/publication timing, owns randomness, sees all models through
 physical actuation in canonical MJCF actuator order. Optional `metadata` is a
 freeform JSON object and has no execution semantics.
 
+Set `primarySimulator` to `mujoco`, `browser-mujoco`,
+`isaac-sim-cpu-physx`, or `isaac-sim-gpu-physx`. The `browser-mujoco` profile
+uses the model's `mujoco-cpu` compatibility declaration.
+
 Bundles use Miniverse's stock camera unless they explicitly declare a viewer
 preference. To change only this bundle's automatic framing, add:
 
