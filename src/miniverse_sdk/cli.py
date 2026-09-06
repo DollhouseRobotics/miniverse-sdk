@@ -59,7 +59,7 @@ def auth_login(args: argparse.Namespace) -> dict[str, Any]:
     client = Client(api_origin, None)
     created = client.request_form("/api/auth/device/code", {
         "client_id": "miniverse-cli",
-        "scope": "openid profile email offline_access bundles:read bundles:upload bundles:publish tests:run tests:read tokens:manage",
+        "scope": "openid profile email offline_access read write",
         "resource": api_origin,
     })
     verification = str(created.get("verification_uri_complete") or created.get("verification_uri") or "")

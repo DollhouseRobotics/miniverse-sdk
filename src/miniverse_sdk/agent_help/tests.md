@@ -67,7 +67,7 @@ complete report must fit within 64 KiB.
 Tests receive at most 30 seconds of active execution wall time. Time spent in
 the admission queue or worker provisioning does not consume that budget.
 There is no automatic restart after activation. Existing OAuth users should
-run `miniverse auth login` again to grant `tests:run` and `tests:read`;
+run `miniverse auth login` again if their grant lacks the `read` and `write` permissions;
 personal API tokens retain their existing account permissions. Treat a passing report as
 the only success signal; allocation, running status, or a connected worker is
 not test evidence.

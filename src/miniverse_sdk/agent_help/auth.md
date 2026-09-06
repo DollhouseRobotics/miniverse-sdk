@@ -8,8 +8,15 @@ one with an optional name that identifies its destination:
 miniverse token create --name "gpu-runner" --json
 ```
 
-If your saved login predates token management, run `miniverse auth login` again
-once to authorize the required `tokens:manage` scope.
+CLI login requests `read` and `write`, plus the standard identity and refresh
+scopes. `write` includes personal API token management. Grant it only to clients
+you trust to create credentials. Administrative operations use a separate
+`admin` scope and also require an administrator account; CLI login does not
+request it.
+
+Existing granular grants retain their original permissions. If an older login
+lacks a permission you need, run `miniverse auth login` again to consent to the
+current scopes.
 
 The token value is returned only once. Transfer it directly to the destination's
 secret manager and expose it to Miniverse commands as `MINIVERSE_API_TOKEN`.

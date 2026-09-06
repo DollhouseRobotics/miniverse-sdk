@@ -749,6 +749,24 @@ class CliTest(unittest.TestCase):
         with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "environment-token"}, clear=False):
             self.assertEqual(credential(), ("environment-token", "MINIVERSE_API_TOKEN"))
 
+    def test_device_login_requests_user_permissions_and_preserves_granted_scope(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "MINIVERSE_AUTH_FILE": str(Path(directory) / "auth.json"),
+            "MINIVERSE_AUTH_STORE": "file",
+            "MINIVERSE_API_TOKEN": "",
+        }, clear=False):
+            with patch.object(Client, "request_form", side_effect=[
+                {"verification_uri": "https://miniverse.test/device", "device_code": "test-code", "interval": 1},
+                {"access_token": "test-access", "refresh_token": "test-refresh", "expires_in": 3600,
+                 "scope": "openid email offline_access read"},
+            ]) as request, patch("miniverse_sdk.cli.time.sleep"), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["--origin", "https://miniverse.test", "auth", "login", "--no-browser"]), 0)
+            requested = request.call_args_list[0].args[1]["scope"].split()
+            self.assertEqual(set(requested), {"openid", "profile", "email", "offline_access", "read", "write"})
+            saved = load_oauth_credential("https://miniverse.test")
+            self.assertEqual(saved.scope, "openid email offline_access read")
+            self.assertTrue(saved.renewable)
+
     def test_personal_token_create_list_and_delete_commands(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), TokenHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
