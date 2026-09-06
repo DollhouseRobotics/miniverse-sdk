@@ -74,6 +74,14 @@ python -m twine check dist/*
 Miniverse server-side import remains authoritative. Local validation is
 preflight feedback for bundle authors and agents.
 
+## Approved tests
+
+Run bounded test code against an uploaded immutable revision with
+`miniverse test start ID@REVISION_ID --file test_policy.py --json`. The command
+waits for the retained report by default; use `--no-wait`, then `test status`,
+`test results --wait`, or `test stop` to manage the session. See
+`miniverse agent-help tests` for the sandbox and canonical frame contract.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).

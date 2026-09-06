@@ -314,6 +314,76 @@ class TokenHandler(BaseHTTPRequestHandler):
         return self._json({"ok": True, "id": token_id}, 200 if len(TokenHandler.tokens) < before else 404)
 
 class CliTest(unittest.TestCase):
+    def test_approved_test_start_waits_and_classifies_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "approved.py"
+            source.write_text("class Test:\n    pass\n", encoding="utf-8")
+            client = unittest.mock.Mock()
+            client.request.side_effect = [
+                {"sessionId": "sim_test", "status": "queued"},
+                {"status": "pending", "pollAfterSeconds": 1},
+                {"status": "complete", "report": {"outcome": "assertion_failed"}},
+            ]
+            output = io.StringIO()
+            with patch("miniverse_sdk.cli.credential", return_value=("test-token", "environment")), \
+                    patch("miniverse_sdk.cli.Client", return_value=client), \
+                    patch("miniverse_sdk.cli.time.sleep"), redirect_stdout(output):
+                self.assertEqual(main(["test", "start", "robot@brv_123", "--file", str(source), "--json"]), 4)
+            request = client.request.call_args_list[0]
+            self.assertEqual(request.args[0], "/api/v1/tests")
+            self.assertEqual(request.args[1]["seed"], 0)
+            self.assertEqual(request.args[1]["source"], source.read_text())
+            self.assertEqual(len(request.args[1]["idempotencyKey"]), 36)
+            self.assertEqual(json.loads(output.getvalue())["report"]["outcome"], "assertion_failed")
+
+    def test_approved_test_poll_timeout_retains_session_id(self):
+        client = unittest.mock.Mock()
+        output = io.StringIO()
+        with patch("miniverse_sdk.cli.credential", return_value=("test-token", "environment")), \
+                patch("miniverse_sdk.cli.Client", return_value=client), \
+                patch("miniverse_sdk.cli.time.monotonic", side_effect=[0, 2]), redirect_stdout(output):
+            self.assertEqual(main(["test", "results", "sim_timeout", "--wait", "--timeout", "1", "--json"]), 5)
+        self.assertEqual(json.loads(output.getvalue())["sessionId"], "sim_timeout")
+        client.request.assert_not_called()
+
+    def test_approved_test_source_validation_and_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            oversized = Path(directory) / "large.py"
+            oversized.write_bytes(b"x" * 65_537)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["test", "start", "robot@revision", "--file", str(oversized), "--no-wait", "--json"]), 1)
+            self.assertEqual(json.loads(output.getvalue())["code"], "local_error")
+        client = unittest.mock.Mock()
+        client.request.return_value = {"sessionId": "sim_test", "status": "stopped"}
+        with patch("miniverse_sdk.cli.credential", return_value=("test-token", "environment")), \
+                patch("miniverse_sdk.cli.Client", return_value=client), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["test", "stop", "sim_test", "--json"]), 0)
+        client.request.assert_called_once_with("/api/v1/tests/sim_test/stop", {})
+
+    def test_approved_test_infrastructure_report_has_distinct_exit(self):
+        client = unittest.mock.Mock()
+        client.request.return_value = {"status": "complete", "report": {"outcome": "infrastructure_failed"}}
+        with patch("miniverse_sdk.cli.credential", return_value=("test-token", "environment")), \
+                patch("miniverse_sdk.cli.Client", return_value=client), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["test", "results", "sim_test", "--json"]), 5)
+
+    def test_completed_test_without_report_cannot_pass(self):
+        client = unittest.mock.Mock()
+        client.request.return_value = {"status": "complete"}
+        with patch("miniverse_sdk.cli.credential", return_value=("test-token", "environment")), \
+                patch("miniverse_sdk.cli.Client", return_value=client), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["test", "results", "sim_test", "--wait", "--json"]), 3)
+
+    def test_approved_test_polling_contract_error_preserves_api_exit(self):
+        client = unittest.mock.Mock()
+        client.request.return_value = {"status": "unknown"}
+        output = io.StringIO()
+        with patch("miniverse_sdk.cli.credential", return_value=("test-token", "environment")), \
+                patch("miniverse_sdk.cli.Client", return_value=client), redirect_stdout(output):
+            self.assertEqual(main(["test", "results", "sim_test", "--wait", "--json"]), 3)
+        self.assertEqual(json.loads(output.getvalue())["code"], "test_contract_error")
+
     def test_terrain_build_creates_the_canonical_data_only_grid(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

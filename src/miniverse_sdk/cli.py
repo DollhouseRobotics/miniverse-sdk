@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import urllib.parse
+import uuid
 import webbrowser
 import zipfile
 from dataclasses import dataclass
@@ -24,7 +25,11 @@ from .config import OAuthCredential, auth_file, auth_store, credential, delete_o
 from .terrain import TerrainValidationError, build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb, load_height_array
 from .validation import ModelValidation, validate_bundle_model_backends, validate_model
 
-TOPICS = {"auth", "bundles", "environments", "mcp", "upload", "sessions", "onnx", "terrain"}
+TOPICS = {"auth", "bundles", "environments", "mcp", "upload", "sessions", "tests", "onnx", "terrain"}
+TEST_NONPASSING_EXIT = 4
+TEST_INFRASTRUCTURE_EXIT = 5
+TEST_OUTCOMES = {"passed", "assertion_failed", "policy_failed", "test_error", "timed_out", "cancelled", "infrastructure_failed"}
+TEST_INFRASTRUCTURE_OUTCOMES = {"timed_out", "cancelled", "infrastructure_failed"}
 
 
 @dataclass(frozen=True)
@@ -54,7 +59,7 @@ def auth_login(args: argparse.Namespace) -> dict[str, Any]:
     client = Client(api_origin, None)
     created = client.request_form("/api/auth/device/code", {
         "client_id": "miniverse-cli",
-        "scope": "openid profile email offline_access bundles:read bundles:upload bundles:publish tokens:manage",
+        "scope": "openid profile email offline_access bundles:read bundles:upload bundles:publish tests:run tests:read tokens:manage",
         "resource": api_origin,
     })
     verification = str(created.get("verification_uri_complete") or created.get("verification_uri") or "")
@@ -132,6 +137,59 @@ def bundle_upload(args: argparse.Namespace) -> dict[str, Any]:
     return status
 
 
+def _test_path(session_id: str, suffix: str = "") -> str:
+    return f"/api/v1/tests/{urllib.parse.quote(session_id, safe='')}{suffix}"
+
+
+def _test_result(value: dict[str, Any]) -> CommandResult:
+    if value.get("status") == "pending":
+        return CommandResult(value)
+    if value.get("status") != "complete" or not isinstance(value.get("report"), dict):
+        raise ApiError(502, "server returned an incomplete test report", "test_contract_error")
+    outcome = value["report"].get("outcome")
+    if outcome not in TEST_OUTCOMES:
+        raise ApiError(502, "server returned an invalid test outcome", "test_contract_error")
+    if outcome == "passed":
+        return CommandResult(value)
+    return CommandResult(value, TEST_INFRASTRUCTURE_EXIT if outcome in TEST_INFRASTRUCTURE_OUTCOMES else TEST_NONPASSING_EXIT)
+
+
+def _wait_for_test_results(client: Client, session_id: str, timeout: int) -> CommandResult:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = client.request(_test_path(session_id, "/results"))
+        if value.get("status") == "complete":
+            return _test_result(value)
+        if value.get("status") != "pending":
+            raise ApiError(502, "server returned an invalid test results status", "test_contract_error")
+        time.sleep(max(1, min(10, int(value.get("pollAfterSeconds", 2)))))
+    return CommandResult({"ok": False, "code": "test_poll_timeout", "status": "timed_out", "sessionId": session_id}, TEST_INFRASTRUCTURE_EXIT)
+
+
+def _wait_for_test_status(client: Client, session_id: str, timeout: int) -> CommandResult:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = client.request(_test_path(session_id))
+        if value.get("status") in {"complete", "stopped", "failed", "expired", "cancelled", "timed_out", "infrastructure_failed"}:
+            return CommandResult(value)
+        time.sleep(max(1, min(10, int(value.get("pollAfterSeconds", 2)))))
+    return CommandResult({"ok": False, "code": "test_poll_timeout", "status": "timed_out", "sessionId": session_id}, TEST_INFRASTRUCTURE_EXIT)
+
+
+def _read_test_source(path: str) -> str:
+    data = sys.stdin.buffer.read(65_537) if path == "-" and hasattr(sys.stdin, "buffer") else (
+        sys.stdin.read(65_537).encode("utf-8") if path == "-" else Path(path).read_bytes()
+    )
+    if not data:
+        raise ValueError("test source must be nonempty")
+    if len(data) > 65_536:
+        raise ValueError("test source must not exceed 64 KiB")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("test source must be UTF-8") from error
+
+
 def terrain_build(args: argparse.Namespace) -> dict[str, Any]:
     width, height, values = load_height_array(args.heights)
     data = build_heightfield_glb(
@@ -169,13 +227,17 @@ def terrain_build(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="miniverse", description="Validate and upload Miniverse .mini bundles.")
+    root = argparse.ArgumentParser(
+        prog="miniverse",
+        description="Validate and upload Miniverse .mini bundles.",
+        epilog="Agents: run 'miniverse agent-help' before authoring, uploading, or testing bundles. Use 'miniverse agent-help TOPIC' for task-specific instructions.",
+    )
     root.add_argument("--origin", help="Miniverse API origin; defaults to MINIVERSE_ORIGIN or https://miniverse.bot")
     root.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     commands = root.add_subparsers(dest="command", required=True)
     version = commands.add_parser("version")
     version.add_argument("--json", action="store_true", dest="command_json")
-    help_command = commands.add_parser("agent-help")
+    help_command = commands.add_parser("agent-help", help="Read the agent guide and task-specific instructions")
     help_command.add_argument("topic", nargs="?", choices=sorted(TOPICS))
     help_command.add_argument("--all", action="store_true")
     auth = commands.add_parser("auth")
@@ -236,6 +298,27 @@ def parser() -> argparse.ArgumentParser:
     publish = bundle_commands.add_parser("publish")
     publish.add_argument("bundle_version", help="Bundle revision as <id>@<revision-id>")
     publish.add_argument("--json", action="store_true", dest="command_json")
+    test = commands.add_parser("test", help="Run approved tests against an immutable bundle revision")
+    test_commands = test.add_subparsers(dest="test_command", required=True)
+    test_start = test_commands.add_parser("start", help="Start an approved test")
+    test_start.add_argument("bundle_revision", help="Bundle revision as <id>@<revision-id>")
+    test_start.add_argument("--file", required=True, help="UTF-8 test source path, or - for stdin")
+    test_start.add_argument("--seed", type=int, default=0)
+    test_start.add_argument("--idempotency-key")
+    test_start.add_argument("--no-wait", action="store_true")
+    test_start.add_argument("--timeout", type=int, default=3600)
+    test_status = test_commands.add_parser("status", help="Get test status")
+    test_status.add_argument("session_id")
+    test_status.add_argument("--wait", action="store_true")
+    test_status.add_argument("--timeout", type=int, default=3600)
+    test_results = test_commands.add_parser("results", help="Get retained test results")
+    test_results.add_argument("session_id")
+    test_results.add_argument("--wait", action="store_true")
+    test_results.add_argument("--timeout", type=int, default=3600)
+    test_stop = test_commands.add_parser("stop", help="Stop a test")
+    test_stop.add_argument("session_id")
+    for leaf in (test_start, test_status, test_results, test_stop):
+        leaf.add_argument("--json", action="store_true", dest="command_json")
     return root
 
 
@@ -350,6 +433,33 @@ def run(args: argparse.Namespace) -> Any:
         return _model_result(validate_model(path), strict=args.strict, model_id=path.stem)
     if args.command == "terrain":
         return terrain_build(args)
+    if args.command == "test":
+        api_origin = origin(args.origin)
+        saved, _ = credential(api_origin)
+        client = Client(api_origin, saved)
+        if args.test_command == "start":
+            bundle_id, separator, revision_id = args.bundle_revision.partition("@")
+            if not separator or not bundle_id or not revision_id:
+                raise ValueError("bundle revision must be <id>@<revision-id>")
+            if args.timeout <= 0:
+                raise ValueError("timeout must be greater than zero")
+            if args.seed < 0 or args.seed > 0xffffffff:
+                raise ValueError("seed must be between 0 and 4294967295")
+            started = client.request("/api/v1/tests", {
+                "bundleId": bundle_id, "revisionId": revision_id, "source": _read_test_source(args.file),
+                "seed": args.seed, "idempotencyKey": args.idempotency_key or str(uuid.uuid4()),
+            })
+            session_id = started.get("sessionId")
+            if not isinstance(session_id, str) or not session_id:
+                raise ApiError(502, "server returned an invalid test session", "test_contract_error")
+            return started if args.no_wait else _wait_for_test_results(client, session_id, args.timeout)
+        if args.test_command in {"status", "results"} and args.timeout <= 0:
+            raise ValueError("timeout must be greater than zero")
+        if args.test_command == "status":
+            return _wait_for_test_status(client, args.session_id, args.timeout) if args.wait else client.request(_test_path(args.session_id))
+        if args.test_command == "results":
+            return _wait_for_test_results(client, args.session_id, args.timeout) if args.wait else _test_result(client.request(_test_path(args.session_id, "/results")))
+        return client.request(_test_path(args.session_id, "/stop"), {})
     if args.command == "bundle":
         if args.bundle_command == "validate":
             validated = validate_bundle(args.bundle, strict=args.strict)
