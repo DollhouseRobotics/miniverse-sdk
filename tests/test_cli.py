@@ -21,6 +21,7 @@ from miniverse_sdk.cli import agent_help, main, parser
 from miniverse_sdk.config import OAuthCredential, credential, credential_lock, delete_oauth_credential, load_oauth_credential, save_oauth_credential
 from miniverse_sdk.onnx_metadata import ONNX_HASH_KEY, ONNX_METADATA_KEY, ONNX_SCHEMA_KEY
 from miniverse_sdk.terrain import build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb
+from miniverse_sdk.validation import validate_bundle_manifest
 
 
 def _varint(value: int) -> bytes:
@@ -314,6 +315,43 @@ class TokenHandler(BaseHTTPRequestHandler):
         return self._json({"ok": True, "id": token_id}, 200 if len(TokenHandler.tokens) < before else 404)
 
 class CliTest(unittest.TestCase):
+    def test_gamepad_component_schema_uses_named_inputs(self):
+        manifest = {
+            "version": "v1", "id": "fixture", "name": "Fixture", "primarySimulator": "mujoco",
+            "embodiment": {"kind": "mjcf", "path": "embodiment/robot.xml"},
+            "models": [{"id": "policy"}],
+            "program": {"apiVersion": "dhr.python-policy/v1", "entrypoint": "policy:Policy"},
+            "ui": {"components": [{
+                "id": "walking-gamepad", "renderer": "builtin/gamepad", "commandId": "walking-control",
+                "options": {"bindings": [
+                    {"source": "axis", "input": "left-stick-x"},
+                    {"source": "button", "input": "south", "component": 1},
+                    {"source": "magnitude", "input": "right-stick", "component": 2, "deadzone": 0.2},
+                    {"source": "angle", "input": "left-stick", "component": 3},
+                ]},
+            }]},
+        }
+        self.assertEqual(validate_bundle_manifest(manifest), ())
+
+        for label, binding in {
+            "legacy index": {"source": "axis", "input": "left-stick-x", "index": 0},
+            "numeric input": {"source": "axis", "input": 0},
+            "axis name for button": {"source": "button", "input": "left-stick-x"},
+            "button name for magnitude": {"source": "magnitude", "input": "south"},
+            "unknown name": {"source": "axis", "input": "middle-stick-x"},
+            "deadzone": {"source": "axis", "input": "left-stick-x", "deadzone": 1},
+            "unknown field": {"source": "axis", "input": "left-stick-x", "scale": 2},
+        }.items():
+            with self.subTest(label=label):
+                manifest["ui"]["components"][0]["options"]["bindings"] = [binding]
+                self.assertTrue(validate_bundle_manifest(manifest))
+
+        manifest["ui"]["components"][0] = {
+            "id": "custom", "renderer": "custom/controller", "commandId": "walking-control",
+            "options": {"authorDefined": True},
+        }
+        self.assertEqual(validate_bundle_manifest(manifest), ())
+
     def test_approved_test_start_waits_and_classifies_reports(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "approved.py"

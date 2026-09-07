@@ -103,7 +103,16 @@
               "renderer": {"type": "string", "pattern": "^(builtin|custom)/", "maxLength": 160},
               "commandId": {"$ref": "#/$defs/id"},
               "options": {"type": "object"}
-            }
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"renderer": {"const": "builtin/gamepad"}}, "required": ["renderer"]},
+                "then": {
+                  "required": ["options"],
+                  "properties": {"options": {"$ref": "#/$defs/gamepadOptions"}}
+                }
+              }
+            ]
           }
         }
       }
@@ -172,6 +181,39 @@
   "$defs": {
     "simulator": {"enum": ["mujoco", "browser-mujoco", "isaac-sim-cpu-physx", "isaac-sim-gpu-physx"]},
     "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "gamepadOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bindings"],
+      "properties": {
+        "bindings": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/gamepadBinding"}
+        }
+      }
+    },
+    "gamepadBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "input"],
+      "properties": {
+        "component": {"type": "integer", "minimum": 0, "default": 0},
+        "source": {"enum": ["axis", "button", "magnitude", "angle"]},
+        "input": {"type": "string"},
+        "min": {"type": "number"},
+        "max": {"type": "number"},
+        "invert": {"type": "boolean", "default": false},
+        "deadzone": {"type": "number", "minimum": 0, "exclusiveMaximum": 1, "default": 0.15},
+        "toggle": {"type": "boolean", "default": false}
+      },
+      "allOf": [
+        {"if": {"properties": {"source": {"const": "axis"}}, "required": ["source"]}, "then": {"properties": {"input": {"enum": ["left-stick-x", "left-stick-y", "right-stick-x", "right-stick-y"]}}}},
+        {"if": {"properties": {"source": {"const": "button"}}, "required": ["source"]}, "then": {"properties": {"input": {"enum": ["south", "east", "west", "north", "left-bumper", "right-bumper", "left-trigger", "right-trigger", "select", "start", "left-stick-press", "right-stick-press", "dpad-up", "dpad-down", "dpad-left", "dpad-right", "home"]}}}},
+        {"if": {"properties": {"source": {"enum": ["magnitude", "angle"]}}, "required": ["source"]}, "then": {"properties": {"input": {"enum": ["left-stick", "right-stick"]}}}}
+      ]
+    },
     "appearance": {
       "type": "object",
       "additionalProperties": false,

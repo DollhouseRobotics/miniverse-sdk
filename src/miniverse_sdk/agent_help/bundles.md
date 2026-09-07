@@ -51,6 +51,65 @@ presentation only and applies consistently on all viewer surfaces; it does not
 change simulation state or physics. Omit either preference
 unless the bundle deliberately needs it; validation does not inject defaults.
 
+## Gamepad controls
+
+Add a `builtin/gamepad` UI
+component for each command to be controlled. Its required `id` and `commandId`
+have their usual meanings, while `options` contains only a required `bindings`
+array (1–32 entries). The viewer combines all gamepad components into one
+selector. A gamepad component can coexist with another component for the same
+command, such as a touch `joystick2d`; a hidden command is also allowed when it
+should be gamepad-only. There may be at most one gamepad component per command.
+
+Each binding requires `source` (`axis`, `button`, `magnitude`, or `angle`) and
+a named `input`. `component` is a zero-based numeric command component and
+defaults to `0`. Optional `min` and `max`
+default to the command range bounds, or `[-1, 1]` when the command has no
+range. `invert` and `toggle` default to `false`; `deadzone` defaults to `0.15`
+and must be at least 0 and less than 1.
+
+```json
+"commands": [{
+  "id": "walking-control", "kind": "joystick2d",
+  "default": [0, 0], "range": [-1, 1], "step": 0.05,
+  "frame": "base", "sliceLength": 2, "update": "continuous"
+}],
+"ui": {"components": [{
+  "id": "walking-gamepad",
+  "renderer": "builtin/gamepad",
+  "commandId": "walking-control",
+  "options": {"bindings": [
+    {"component": 0, "source": "axis", "input": "left-stick-x"},
+    {"component": 1, "source": "axis", "input": "left-stick-y", "invert": true}
+  ]}
+}]}
+```
+
+The exact inputs are:
+
+- `axis`: `left-stick-x`, `left-stick-y`, `right-stick-x`, `right-stick-y`;
+- `button`: `south`, `east`, `west`, `north`, `left-bumper`, `right-bumper`,
+  `left-trigger`, `right-trigger`, `select`, `start`, `left-stick-press`,
+  `right-stick-press`, `dpad-up`, `dpad-down`, `dpad-left`, `dpad-right`, `home`;
+- `magnitude` and `angle`: `left-stick`, `right-stick`.
+
+Face-button names are positional: south=A/Cross, east=B/Circle,
+west=X/Square, and north=Y/Triangle. The triggers are left-trigger=LT/L2 and
+right-trigger=RT/R2. Here `walking-control` is ordered `[turn, forward]`:
+the horizontal axis drives turn and the inverted vertical axis drives forward.
+Axis input is signed.
+Buttons and stick magnitude are unipolar and map from zero through `min..max`.
+Set `min: 0` when a trigger or magnitude controls nonnegative speed.
+Stick angle maps up to the output midpoint and right to three quarters of the
+output range; the centered stick holds the current command. Miniverse neither
+infers movement semantics nor applies a camera-relative transform.
+
+The Worker additionally rejects out-of-bounds or duplicate command components,
+an output interval where `min >= max` or outside the command range, non-button
+bindings for `boolean`/`momentary`, and `toggle` on anything except `boolean`.
+Gamepad components cannot target `targetPosition` commands or commands that
+restart the episode. The browser requires the standard Gamepad API mapping.
+
 ## Bundle metadata conventions
 
 - **Name:** Use a simple name for the policy and what it does. Do not include
