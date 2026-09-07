@@ -2,6 +2,9 @@
 
 ## Purpose
 
+This is the Miniverse SDK/CLI, designed to be used by AI agents, in order to perform operations on the Miniverse robotics
+cloud simulation platform. With it, agents can upload miniverse bundles, test them, and more.
+
 This repository owns the public `miniverse-sdk` Python distribution, its
 `miniverse` command, package tests, versioned agent help, and the Miniverse
 agent skill.
@@ -29,3 +32,17 @@ small enough to install easily and make it direct agents to the installed
 
 Never commit credentials, bundle archives, checkpoints, signed upload URLs, or
 OAuth state.
+
+## Updating `agent-help`
+
+`agent-help` is meant to guide AI agents on how to use the Miniverse SDK. When changes are made to the SDK, `agent-help` must be updated to provide proper guidance, based on the changes.
+
+Do not include any internal platform details in the help. These docs should be geared toward user/agent facing API surfaces and behavior.
+
+Do not include any migration or information about how the SDK used to work before new changes. Docs should only represent the current state of the SDK, in the present tense.
+
+## Deployment
+
+Use proper semver versions when publishing a new version.
+
+Use `uv` to publish to pypi.
