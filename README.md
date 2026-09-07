@@ -54,22 +54,6 @@ Use 512 x 512 or smaller as the portable terrain budget. The CLI warns above
 that size; the 1,048,576-sample hard limit should be used only after measuring
 the target browser and simulator profile.
 
-## Closed-loop attachments
-
-Declare permanent rigid attachments with standard MJCF body/site welds in the
-embodiment. For local Isaac attachment preflight, use the optional compiler:
-
-```bash
-uv tool install --force "miniverse-sdk[mjcf]"
-miniverse agent-help attachments
-miniverse bundle validate robot.mini --json
-```
-
-The extra does not require Isaac or a GPU. It checks the platform's supported
-equality subset, including inherited defaults and includes, before upload.
-See the [attachment guide](src/miniverse_sdk/agent_help/attachments.md) for a
-complete MJCF example, backend limits and scene-hash migration guidance.
-
 ## Agent skill
 
 The repository includes a Miniverse skill at
@@ -81,7 +65,7 @@ package and reads the versioned instructions bundled with the CLI through
 ## Develop
 
 ```bash
-python -m pip install -e '.[mjcf]'
+python -m pip install -e .
 python -m unittest discover -s tests -v
 python -m build
 python -m twine check dist/*
@@ -89,9 +73,6 @@ python -m twine check dist/*
 
 Miniverse server-side import remains authoritative. Local validation is
 preflight feedback for bundle authors and agents.
-
-The `mjcf` extra enables native compiler regression tests. Also run the suite
-with a base-only install to verify that ordinary bundles do not need MuJoCo.
 
 ## Approved tests
 

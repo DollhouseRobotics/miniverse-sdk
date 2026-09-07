@@ -25,7 +25,7 @@ from .config import OAuthCredential, auth_file, auth_store, credential, delete_o
 from .terrain import TerrainValidationError, build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb, load_height_array
 from .validation import ModelValidation, validate_bundle_model_backends, validate_model
 
-TOPICS = {"auth", "bundles", "attachments", "environments", "mcp", "upload", "sessions", "tests", "onnx", "terrain"}
+TOPICS = {"auth", "bundles", "environments", "mcp", "upload", "sessions", "tests", "onnx", "terrain"}
 TEST_NONPASSING_EXIT = 4
 TEST_INFRASTRUCTURE_EXIT = 5
 TEST_OUTCOMES = {"passed", "assertion_failed", "policy_failed", "test_error", "timed_out", "cancelled", "infrastructure_failed"}

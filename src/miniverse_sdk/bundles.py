@@ -172,7 +172,7 @@ def _resolve_mjcf(base: PurePosixPath, value: str, label: str, subtree: str) -> 
     return "/".join(parts)
 
 
-def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.ZipInfo], declaration: dict[str, Any], *, subtree: str = "embodiment", simulators: tuple[str, ...] = ()) -> tuple[str, bytes]:
+def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.ZipInfo], declaration: dict[str, Any], *, subtree: str = "embodiment") -> tuple[str, bytes]:
     if declaration.get("kind") != "mjcf":
         raise BundleValidationError("invalid_manifest", f"{subtree}.kind must be mjcf")
     full_entrypoint = _mjcf_path(declaration.get("path"), f"{subtree}.path")
@@ -253,11 +253,11 @@ def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.Zip
     if selected != available:
         extras = sorted(set(available) - set(selected))
         raise BundleValidationError("undeclared_member", f"bundle contains unused {subtree} members: {', '.join(prefix + name for name in extras)}")
-    if subtree == "embodiment" and {"isaac-sim-cpu-physx", "isaac-sim-gpu-physx"}.intersection(simulators):
-        from .mjcf_constraints import MjcfConstraintError, validate_isaac_constraints
+    if subtree == "embodiment":
+        from .mjcf_constraints import MjcfConstraintError, validate_weld_declarations
 
         try:
-            validate_isaac_constraints(entrypoint, selected, documents)
+            validate_weld_declarations(documents)
         except MjcfConstraintError as error:
             raise BundleValidationError(error.code, str(error)) from error
     entries = [{"path": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)} for name, data in sorted(selected.items())]
@@ -393,7 +393,7 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         if set(embodiment) - {"kind", "path", "appearance", "bodyDynamicsOverrides"}:
             raise BundleValidationError("invalid_manifest", "embodiment accepts kind, path, appearance, and bodyDynamicsOverrides")
         _validate_body_dynamics_overrides(embodiment.get("bodyDynamicsOverrides"))
-        embodiment_path, embodiment_archive = _compile_embodiment(archive, members, embodiment, simulators=(simulator, *compatible))
+        embodiment_path, embodiment_archive = _compile_embodiment(archive, members, embodiment)
         program = _object(manifest.get("program"), "program")
         if set(program) != {"apiVersion", "entrypoint"} or program.get("apiVersion") != "dhr.python-policy/v1":
             raise BundleValidationError("invalid_manifest", "program must contain only apiVersion and entrypoint")
