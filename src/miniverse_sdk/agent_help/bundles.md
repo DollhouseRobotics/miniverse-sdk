@@ -23,6 +23,12 @@ Set `primarySimulator` to `mujoco`, `browser-mujoco`,
 `isaac-sim-cpu-physx`, or `isaac-sim-gpu-physx`. The `browser-mujoco` profile
 uses the model's `mujoco-cpu` compatibility declaration.
 
+For permanent rigid or closed-loop attachments, read
+`miniverse agent-help attachments`. Author standard MJCF welds in the
+embodiment, not new commands or manifest fields. Isaac equality preflight
+requires the optional `mjcf` extra and also applies when Isaac appears only
+in `compatibleSimulators`.
+
 Bundles use Miniverse's stock camera unless they explicitly declare a viewer
 preference. To change only this bundle's automatic framing, add:
 

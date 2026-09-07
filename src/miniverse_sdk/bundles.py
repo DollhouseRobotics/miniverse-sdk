@@ -172,7 +172,7 @@ def _resolve_mjcf(base: PurePosixPath, value: str, label: str, subtree: str) -> 
     return "/".join(parts)
 
 
-def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.ZipInfo], declaration: dict[str, Any], *, subtree: str = "embodiment") -> tuple[str, bytes]:
+def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.ZipInfo], declaration: dict[str, Any], *, subtree: str = "embodiment", simulators: tuple[str, ...] = ()) -> tuple[str, bytes]:
     if declaration.get("kind") != "mjcf":
         raise BundleValidationError("invalid_manifest", f"{subtree}.kind must be mjcf")
     full_entrypoint = _mjcf_path(declaration.get("path"), f"{subtree}.path")
@@ -185,12 +185,14 @@ def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.Zip
         raise BundleValidationError("missing_member", f"bundle {subtree} entrypoint is missing")
     pending = [entrypoint]
     selected: dict[str, bytes] = {}
+    xml_members = {entrypoint}
+    documents: dict[str, ElementTree.Element] = {}
     meshdir = ""
     texturedir = ""
     include_graph: dict[str, list[str]] = {}
     while pending:
         relative = pending.pop()
-        if relative in selected:
+        if relative in selected and (relative not in xml_members or relative in documents):
             continue
         if relative not in available:
             raise BundleValidationError("missing_member", f"bundle {subtree} dependency is missing: {subtree}/{relative}")
@@ -200,12 +202,13 @@ def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.Zip
         selected[relative] = data
         if len(selected) > 4096:
             raise BundleValidationError("invalid_embodiment", f"{subtree} contains too many files")
-        if PurePosixPath(relative).suffix.lower() not in {".xml", ".mjcf"}:
+        if relative not in xml_members and PurePosixPath(relative).suffix.lower() not in {".xml", ".mjcf"}:
             continue
         try:
             document = ElementTree.fromstring(data)
         except ElementTree.ParseError as error:
             raise BundleValidationError("invalid_embodiment", f"{subtree}/{relative} is invalid MJCF XML") from error
+        documents[relative] = document
         compiler = document.find("compiler")
         if compiler is not None:
             if relative != entrypoint:
@@ -220,6 +223,7 @@ def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.Zip
         for include in document.iter("include"):
             target = _resolve_mjcf(parent, str(include.get("file", "")).strip(), "MJCF include", subtree)
             includes.append(target)
+            xml_members.add(target)
             pending.append(target)
         include_graph[relative] = includes
         for element in document.iter():
@@ -249,6 +253,13 @@ def _compile_embodiment(archive: zipfile.ZipFile, members: dict[str, zipfile.Zip
     if selected != available:
         extras = sorted(set(available) - set(selected))
         raise BundleValidationError("undeclared_member", f"bundle contains unused {subtree} members: {', '.join(prefix + name for name in extras)}")
+    if subtree == "embodiment" and {"isaac-sim-cpu-physx", "isaac-sim-gpu-physx"}.intersection(simulators):
+        from .mjcf_constraints import MjcfConstraintError, validate_isaac_constraints
+
+        try:
+            validate_isaac_constraints(entrypoint, selected, documents)
+        except MjcfConstraintError as error:
+            raise BundleValidationError(error.code, str(error)) from error
     entries = [{"path": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)} for name, data in sorted(selected.items())]
     source = {"apiVersion": "dhr.mjcf-asset-set/v1", "entrypoint": entrypoint, "files": entries}
     canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
@@ -382,7 +393,7 @@ def inspect_bundle(path: str | Path) -> BundleInspection:
         if set(embodiment) - {"kind", "path", "appearance", "bodyDynamicsOverrides"}:
             raise BundleValidationError("invalid_manifest", "embodiment accepts kind, path, appearance, and bodyDynamicsOverrides")
         _validate_body_dynamics_overrides(embodiment.get("bodyDynamicsOverrides"))
-        embodiment_path, embodiment_archive = _compile_embodiment(archive, members, embodiment)
+        embodiment_path, embodiment_archive = _compile_embodiment(archive, members, embodiment, simulators=(simulator, *compatible))
         program = _object(manifest.get("program"), "program")
         if set(program) != {"apiVersion", "entrypoint"} or program.get("apiVersion") != "dhr.python-policy/v1":
             raise BundleValidationError("invalid_manifest", "program must contain only apiVersion and entrypoint")
