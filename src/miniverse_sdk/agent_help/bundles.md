@@ -101,14 +101,15 @@ Axis input is signed.
 Buttons and stick magnitude are unipolar and map from zero through `min..max`.
 Set `min: 0` when a trigger or magnitude controls nonnegative speed.
 Stick angle maps up to the output midpoint and right to three quarters of the
-output range; the centered stick holds the current command. Miniverse neither
-infers movement semantics nor applies a camera-relative transform.
+output range; the centered stick holds the current command. Bindings use the
+command's declared units and coordinate frame.
 
-The Worker additionally rejects out-of-bounds or duplicate command components,
-an output interval where `min >= max` or outside the command range, non-button
-bindings for `boolean`/`momentary`, and `toggle` on anything except `boolean`.
-Gamepad components cannot target `targetPosition` commands or commands that
-restart the episode. The browser requires the standard Gamepad API mapping.
+Choose a unique, in-bounds command component for each binding and an output
+interval with `min < max` within the command range. Use `button` sources for
+`boolean` and `momentary` commands; `toggle` applies to `boolean` commands.
+Gamepad bindings support `joystick2d`, `scalar`, `heading`, `boolean`, and
+`momentary` commands that continue the current episode. The browser uses the
+standard Gamepad API mapping.
 
 ## Bundle metadata conventions
 
