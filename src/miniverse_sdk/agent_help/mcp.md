@@ -7,6 +7,7 @@ from `miniverse auth login`.
 Use the CLI mainly to:
 
 - validate, inspect, and upload `.mini` bundles;
+- inspect challenge contracts and submit or update policy bundles;
 - check import status and publish ready revisions;
 - create, list, and delete personal API tokens.
 

@@ -32,7 +32,7 @@ TENSORRT_MAX_TOPK_K = 3840
 # regardless of TensorRT compatibility, so the lint reports it as an error.
 RUNTIME_ALLOWED_OPS = {
     "Abs", "Add", "And", "ArgMax", "Atan", "Cast", "Clip", "Concat", "Constant", "Cos",
-    "ConstantOfShape", "Div", "Equal", "Erf", "Exp", "Expand", "Flatten", "Floor",
+    "ConstantOfShape", "Div", "Elu", "Equal", "Erf", "Exp", "Expand", "Flatten", "Floor",
     "Gather", "GatherElements", "Gemm", "Greater", "GreaterOrEqual", "Identity", "IsNaN", "LayerNormalization",
     "LessOrEqual",
     "LeakyRelu", "Less", "Log", "MatMul", "Max", "Min", "Mul", "Neg",

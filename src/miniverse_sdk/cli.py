@@ -21,11 +21,12 @@ from typing import Any
 from . import __version__
 from .api import ApiError, Client
 from .bundles import BundleValidationError, inspect_bundle
+from .challenge_bundles import inspect_challenge_bundle
 from .config import OAuthCredential, auth_file, auth_store, credential, delete_oauth_credential, origin, save_oauth_credential
 from .terrain import TerrainValidationError, build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb, load_height_array
 from .validation import ModelValidation, validate_bundle_model_backends, validate_model
 
-TOPICS = {"auth", "bundles", "environments", "mcp", "upload", "sessions", "tests", "onnx", "terrain"}
+TOPICS = {"auth", "bundles", "challenges", "environments", "mcp", "upload", "sessions", "tests", "onnx", "terrain"}
 TEST_NONPASSING_EXIT = 4
 TEST_INFRASTRUCTURE_EXIT = 5
 TEST_OUTCOMES = {"passed", "assertion_failed", "policy_failed", "test_error", "timed_out", "cancelled", "infrastructure_failed"}
@@ -190,6 +191,34 @@ def _read_test_source(path: str) -> str:
         raise ValueError("test source must be UTF-8") from error
 
 
+def challenge_bundle_upload(args: argparse.Namespace) -> dict[str, Any]:
+    inspected = inspect_challenge_bundle(args.bundle)
+    api_origin = origin(args.origin)
+    saved, source = credential(api_origin)
+    client = Client(api_origin, saved)
+    set_id = urllib.parse.quote(inspected.set_id, safe="._-")
+    prepared = client.request(f"/api/v1/challenge-bundles/{set_id}/revisions", {
+        "archiveSha256": inspected.archive_sha256,
+        "bytes": inspected.archive_bytes,
+        "filename": Path(args.bundle).name,
+    })
+    transfer = prepared.get("transfer")
+    if not isinstance(transfer, dict) or transfer.get("mode") != "single" or not isinstance(transfer.get("url"), str):
+        raise ApiError(502, "server returned unsupported upload instructions", "upload_contract_error")
+    if not prepared.get("uploaded"):
+        headers = transfer.get("headers")
+        if headers is not None and (not isinstance(headers, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in headers.items())):
+            raise ApiError(502, "server returned invalid upload headers", "upload_contract_error")
+        client.upload(str(transfer["url"]), Path(args.bundle), headers)
+    prepared["credentialSource"] = source
+    if args.no_wait:
+        return prepared
+    status = client.wait_for_import(str(prepared["statusUrl"]), args.timeout)
+    if status.get("state") == "failed":
+        raise ApiError(409, str(status.get("error") or "challenge bundle revision failed"), str(status.get("code") or "revision_failed"))
+    return status
+
+
 def terrain_build(args: argparse.Namespace) -> dict[str, Any]:
     width, height, values = load_height_array(args.heights)
     data = build_heightfield_glb(
@@ -224,6 +253,18 @@ def terrain_build(args: argparse.Namespace) -> dict[str, Any]:
         "heightfield": inspected.as_dict(),
         "warnings": list(heightfield_size_warnings(inspected.width, inspected.height)),
     }
+
+
+def _bundle_revision(value: str) -> tuple[str, str]:
+    bundle_id, separator, revision_id = value.partition("@")
+    if not separator or not bundle_id or not revision_id:
+        raise ValueError("bundle revision must be <bundle-id>@<revision-id>")
+    return bundle_id, revision_id
+
+
+def _challenge_bundle(value: str) -> dict[str, str]:
+    bundle_id, revision_id = _bundle_revision(value)
+    return {"bundleId": bundle_id, "bundleRevisionId": revision_id}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -318,6 +359,44 @@ def parser() -> argparse.ArgumentParser:
     test_stop = test_commands.add_parser("stop", help="Stop a test")
     test_stop.add_argument("session_id")
     for leaf in (test_start, test_status, test_results, test_stop):
+        leaf.add_argument("--json", action="store_true", dest="command_json")
+    challenge = commands.add_parser("challenge", help="Discover and submit to challenge sets")
+    challenge_commands = challenge.add_subparsers(dest="challenge_command", required=True)
+    challenge_search = challenge_commands.add_parser("search")
+    challenge_search.add_argument("query", nargs="?")
+    challenge_inspect = challenge_commands.add_parser("inspect")
+    challenge_inspect.add_argument("set_id")
+    challenge_validate = challenge_commands.add_parser("validate")
+    challenge_validate.add_argument("challenge_id")
+    challenge_submit = challenge_commands.add_parser("submit")
+    challenge_submit.add_argument("challenge_id")
+    challenge_submit.add_argument("--name", required=True)
+    challenge_update = challenge_commands.add_parser("update")
+    challenge_update.add_argument("submission_id")
+    challenge_update.add_argument("--expected-revision", type=int, required=True)
+    challenge_list = challenge_commands.add_parser("list")
+    challenge_status = challenge_commands.add_parser("status")
+    challenge_status.add_argument("submission_id")
+    challenge_bundle = challenge_commands.add_parser("bundle", help="Author immutable challenge-definition bundles")
+    challenge_bundle_commands = challenge_bundle.add_subparsers(dest="challenge_bundle_command", required=True)
+    challenge_bundle_validate = challenge_bundle_commands.add_parser("validate")
+    challenge_bundle_validate.add_argument("bundle")
+    challenge_bundle_upload_command = challenge_bundle_commands.add_parser("upload")
+    challenge_bundle_upload_command.add_argument("bundle")
+    challenge_bundle_upload_command.add_argument("--no-wait", action="store_true")
+    challenge_bundle_upload_command.add_argument("--timeout", type=int, default=3600)
+    challenge_bundle_status = challenge_bundle_commands.add_parser("status")
+    challenge_bundle_status.add_argument("set_revision", help="Challenge bundle revision as <set-id>@<revision-id>")
+    challenge_bundle_publish = challenge_bundle_commands.add_parser("publish")
+    challenge_bundle_publish.add_argument("set_revision", help="Challenge bundle revision as <set-id>@<revision-id>")
+    challenge_bundle_publish.add_argument("--expected-current", required=True, help="Current revision ID, or 'null' for the first publish")
+    challenge_bundle_revisions = challenge_bundle_commands.add_parser("revisions")
+    challenge_bundle_revisions.add_argument("set_id")
+    for leaf in (challenge_bundle_validate, challenge_bundle_upload_command, challenge_bundle_status, challenge_bundle_publish, challenge_bundle_revisions):
+        leaf.add_argument("--json", action="store_true", dest="command_json")
+    for leaf in (challenge_validate, challenge_submit, challenge_update):
+        leaf.add_argument("--bundle", required=True, help="One <bundle-id>@<revision-id> to evaluate")
+    for leaf in (challenge_search, challenge_inspect, challenge_validate, challenge_submit, challenge_update, challenge_list, challenge_status):
         leaf.add_argument("--json", action="store_true", dest="command_json")
     return root
 
@@ -460,6 +539,44 @@ def run(args: argparse.Namespace) -> Any:
         if args.test_command == "results":
             return _wait_for_test_results(client, args.session_id, args.timeout) if args.wait else _test_result(client.request(_test_path(args.session_id, "/results")))
         return client.request(_test_path(args.session_id, "/stop"), {})
+    if args.command == "challenge":
+        if args.challenge_command == "bundle":
+            if args.challenge_bundle_command == "validate":
+                return {"ok": True, "errors": [], "warnings": [], **inspect_challenge_bundle(args.bundle).as_dict()}
+            if args.challenge_bundle_command == "upload":
+                return challenge_bundle_upload(args)
+            api_origin = origin(args.origin)
+            saved, _ = credential(api_origin)
+            client = Client(api_origin, saved)
+            if args.challenge_bundle_command == "revisions":
+                set_id = urllib.parse.quote(args.set_id, safe="._-")
+                return client.request(f"/api/v1/challenge-bundles/{set_id}/revisions")
+            set_id, revision_id = _bundle_revision(args.set_revision)
+            base = f"/api/v1/challenge-bundles/{urllib.parse.quote(set_id, safe='._-')}/revisions/{urllib.parse.quote(revision_id, safe='')}"
+            if args.challenge_bundle_command == "status":
+                return client.request(base)
+            expected = None if args.expected_current.lower() == "null" else args.expected_current
+            return client.request(f"{base}/publish", {"expectedCurrentRevisionId": expected})
+        api_origin = origin(args.origin)
+        saved, _ = credential(api_origin)
+        client = Client(api_origin, saved)
+        if args.challenge_command == "search":
+            query = f"?query={urllib.parse.quote(args.query)}" if args.query else ""
+            return client.request(f"/api/v1/challenges{query}")
+        if args.challenge_command == "inspect":
+            return client.request(f"/api/v1/challenge-sets/{urllib.parse.quote(args.set_id, safe='-')}")
+        if args.challenge_command == "list":
+            return client.request("/api/v1/challenge-submissions")
+        if args.challenge_command == "status":
+            return client.request(f"/api/v1/challenge-submissions/{urllib.parse.quote(args.submission_id, safe='')}")
+        bundle = _challenge_bundle(args.bundle)
+        if args.challenge_command == "validate":
+            return client.request(f"/api/v1/challenges/{urllib.parse.quote(args.challenge_id, safe='._:-')}/validate", bundle)
+        if args.challenge_command == "submit":
+            return client.request(f"/api/v1/challenges/{urllib.parse.quote(args.challenge_id, safe='._:-')}/submissions", {"name": args.name, **bundle})
+        return client.request(f"/api/v1/challenge-submissions/{urllib.parse.quote(args.submission_id, safe='')}/revisions", {
+            "expectedRevisionNumber": args.expected_revision, **bundle,
+        })
     if args.command == "bundle":
         if args.bundle_command == "validate":
             validated = validate_bundle(args.bundle, strict=args.strict)

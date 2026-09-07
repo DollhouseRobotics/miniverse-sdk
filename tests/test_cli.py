@@ -183,6 +183,24 @@ def fixture(path: Path, model: bytes | None = None, *, legacy_policy_bindings: b
     return path
 
 
+def challenge_fixture(path: Path) -> Path:
+    manifest = {
+        "version": "v1", "kind": "challenge", "id": "microduck-limit", "name": "Microduck Limit",
+        "primarySimulator": "mujoco", "compatibleSimulators": [],
+        "environment": {"kind": "builtin", "id": "builtin/flat-ground-v1"},
+        "challengeProgram": {"apiVersion": "dhr.python-challenge/v1", "source": "challenge.py"},
+        "challenges": [{
+            "id": "forward-ramp", "name": "Forward ramp", "entrypoint": "challenge:ForwardRamp",
+            "seed": 0, "timeoutSeconds": 32, "commands": [], "gizmos": [],
+            "score": {"label": "Speed", "unit": "m/s", "order": "higher-is-better", "decimals": 3},
+        }],
+    }
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("bundle.json", json.dumps(manifest))
+        archive.writestr("challenge.py", "class ForwardRamp:\n    def reset(self, context): pass\n    def command(self, step): pass\n    def evaluate(self, step): pass\n")
+    return path
+
+
 class Handler(BaseHTTPRequestHandler):
     archive = b""
     state = "created"
@@ -617,6 +635,65 @@ class CliTest(unittest.TestCase):
         self.assertIn(".mini", help_text)
         self.assertNotIn(".dhsim", parser().format_help())
         self.assertNotIn(".dhsim", help_text)
+
+    def test_challenge_commands_bind_one_bundle_to_one_challenge(self):
+        submit = parser().parse_args(["challenge", "submit", "forward-ramp", "--name", "Policy", "--bundle", "policy@brv_" + "1" * 32])
+        self.assertEqual(submit.challenge_command, "submit")
+        self.assertEqual(submit.challenge_id, "forward-ramp")
+        self.assertEqual(submit.bundle, "policy@brv_" + "1" * 32)
+        update = parser().parse_args(["challenge", "update", "chsub_" + "2" * 32, "--expected-revision", "1", "--bundle", "policy@brv_" + "3" * 32])
+        self.assertEqual(update.submission_id, "chsub_" + "2" * 32)
+        help_text = agent_help("challenges", False)
+        self.assertNotIn("--bind", help_text)
+        self.assertNotIn("idempotency-key", help_text)
+
+    def test_challenge_bundle_validate_and_command_shape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = challenge_fixture(Path(directory) / "challenge.mini")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["challenge", "bundle", "validate", str(path), "--json"]), 0)
+            result = json.loads(output.getvalue())
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["kind"], "challenge")
+            self.assertEqual(result["challengeIds"], ["forward-ramp"])
+        publish = parser().parse_args(["challenge", "bundle", "publish", "set@brv_1", "--expected-current", "null"])
+        self.assertEqual(publish.challenge_bundle_command, "publish")
+        upload = parser().parse_args(["challenge", "bundle", "upload", "set.mini", "--no-wait", "--timeout", "12"])
+        self.assertTrue(upload.no_wait)
+        self.assertEqual(upload.timeout, 12)
+
+    def test_challenge_bundle_routes_and_publish_null_semantics(self):
+        client = unittest.mock.Mock()
+        client.request.side_effect = lambda route, value=None: {"route": route, "value": value}
+        commands = (
+            (["challenge", "bundle", "status", "microduck-limit@brv_1"], "/api/v1/challenge-bundles/microduck-limit/revisions/brv_1", None),
+            (["challenge", "bundle", "revisions", "microduck-limit"], "/api/v1/challenge-bundles/microduck-limit/revisions", None),
+            (["challenge", "bundle", "publish", "microduck-limit@brv_2", "--expected-current", "brv_1"], "/api/v1/challenge-bundles/microduck-limit/revisions/brv_2/publish", {"expectedCurrentRevisionId": "brv_1"}),
+            (["challenge", "bundle", "publish", "microduck-limit@brv_1", "--expected-current", "null"], "/api/v1/challenge-bundles/microduck-limit/revisions/brv_1/publish", {"expectedCurrentRevisionId": None}),
+        )
+        with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "test-token"}, clear=False), patch("miniverse_sdk.cli.Client", return_value=client):
+            for argv, route, value in commands:
+                from miniverse_sdk.cli import run
+                result = run(parser().parse_args(argv))
+                self.assertEqual(result, {"route": route, "value": value})
+
+    def test_challenge_bundle_upload_uses_archive_hash_as_retry_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = challenge_fixture(Path(directory) / "challenge.mini")
+            client = unittest.mock.Mock()
+            client.request.return_value = {
+                "uploaded": True, "revisionId": "brv_1", "statusUrl": "/status",
+                "transfer": {"mode": "single", "url": "https://upload.invalid/source"},
+            }
+            with patch.dict(os.environ, {"MINIVERSE_API_TOKEN": "test-token"}, clear=False), patch("miniverse_sdk.cli.Client", return_value=client):
+                from miniverse_sdk.cli import run
+                result = run(parser().parse_args(["challenge", "bundle", "upload", str(path), "--no-wait"]))
+            route, payload = client.request.call_args.args
+            self.assertEqual(route, "/api/v1/challenge-bundles/microduck-limit/revisions")
+            self.assertEqual(payload["archiveSha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertNotIn("idempotencyKey", payload)
+            self.assertEqual(result["credentialSource"], "MINIVERSE_API_TOKEN")
 
     def test_inspect_silently_accepts_legacy_dhsim_extension(self):
         with tempfile.TemporaryDirectory() as directory:

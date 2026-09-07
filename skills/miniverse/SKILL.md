@@ -1,6 +1,6 @@
 ---
 name: miniverse
-description: Work with Dollhouse Robotics Miniverse simulation bundles. Use for authoring, validating, inspecting, uploading, or publishing .mini bundles; packaging MJCF embodiments, ONNX policies, Python controllers, commands, or gizmos; and diagnosing Miniverse bundle-import failures.
+description: Work with Dollhouse Robotics Miniverse simulation bundles and challenges. Use for authoring, validating, inspecting, uploading, or publishing .mini bundles; submitting or updating challenge submissions; packaging MJCF embodiments, ONNX policies, Python controllers, commands, or gizmos; and diagnosing Miniverse bundle-import failures.
 ---
 
 # Miniverse
@@ -74,3 +74,9 @@ its one-time value directly into the destination secret manager as
 environment no longer needs access. Never print, persist in repository files,
 or pass that environment token as a command-line argument. Treat upload,
 import readiness, and publication as separate claims.
+
+For challenge work, run `miniverse agent-help challenges`. Challenge authors
+use `miniverse challenge bundle` to validate, upload, check status, and publish an
+immutable `kind: challenge` definition. Participants still inspect the set
+contract and bind one ready policy bundle revision to one challenge per
+submission; never merge evaluator code or assets into a participant bundle.
