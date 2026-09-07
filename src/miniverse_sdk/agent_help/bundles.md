@@ -29,8 +29,9 @@ embodiment, not new commands or manifest fields. Isaac equality preflight
 requires the optional `mjcf` extra and also applies when Isaac appears only
 in `compatibleSimulators`.
 
-Bundles use Miniverse's stock camera unless they explicitly declare a viewer
-preference. To change only this bundle's automatic framing, add:
+`viewer.camera` and `viewer.worldBend` are independent, optional presentation
+preferences; `viewer` may be empty. To change only this bundle's automatic
+camera framing, add:
 
 ```json
 "viewer": {"camera": {"framingScale": 1.17}}
@@ -40,8 +41,21 @@ preference. To change only this bundle's automatic framing, add:
 above `1` show more of the scene, and values below `1` show less. The setting
 applies to the initial view, **Reset camera**, generated preview, and public
 embed. It does not change simulation state, terrain, tracking controls, or
-episode resets. Omit `viewer` unless the bundle deliberately needs different
-framing.
+episode resets.
+
+World bending is enabled by default when `worldBend` is omitted. Prefer world
+bending when the terrain is flat and the scene is relatively simple. For uneven
+terrain or more complex scenes where curvature obscures the authored layout,
+disable it independently of camera framing:
+
+```json
+"viewer": {"worldBend": {"enabled": false}}
+```
+
+Set `enabled` to `true` to request world bending explicitly. This setting is
+presentation only and applies consistently on all viewer surfaces; it does not
+change simulation state or physics. Omit either preference
+unless the bundle deliberately needs it; validation does not inject defaults.
 
 ## Bundle metadata conventions
 
