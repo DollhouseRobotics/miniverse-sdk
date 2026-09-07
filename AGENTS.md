@@ -41,6 +41,9 @@ Do not include any internal platform details in the help. These docs should be g
 
 Do not include any migration or information about how the SDK used to work before new changes. Docs should only represent the current state of the SDK, in the present tense.
 
+Do not include language about something that cannot be done, unless it's to clarify some limitation that the developer explictly asked you to add. If you want to recommend such copy, you may,
+but it must be approved by the developer first.
+
 ## Deployment
 
 Use proper semver versions when publishing a new version.
