@@ -23,6 +23,12 @@ Set `primarySimulator` to `mujoco`, `browser-mujoco`,
 `isaac-sim-cpu-physx`, or `isaac-sim-gpu-physx`. The `browser-mujoco` profile
 uses the model's `mujoco-cpu` compatibility declaration.
 
+For a permanent rigid attachment, make the attached object a jointless child
+body in the embodiment MJCF. To close a second attachment point, add a standard
+MJCF `<equality><weld .../></equality>` using either two sites or one or two
+bodies. Welds do not add actuator DOFs; simulator support is checked by the
+server for the selected profile.
+
 `viewer.camera` and `viewer.worldBend` are independent, optional presentation
 preferences; `viewer` may be empty. To change only this bundle's automatic
 camera framing, add:
