@@ -727,6 +727,59 @@ class CliTest(unittest.TestCase):
                 with self.assertRaises(BundleValidationError):
                     inspect_bundle(path)
 
+    def test_bundle_world_bend_is_an_independent_preserved_viewer_preference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "world-bend.mini")
+            with zipfile.ZipFile(path, "r") as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+
+            for enabled in (False, True):
+                manifest["viewer"] = {"worldBend": {"enabled": enabled}}
+                packed_manifest = json.dumps(manifest, separators=(",", ":")).encode()
+                values["bundle.json"] = packed_manifest
+                with zipfile.ZipFile(path, "w") as archive:
+                    for name, value in values.items():
+                        archive.writestr(name, value)
+                self.assertEqual(inspect_bundle(path).manifest["viewer"], {"worldBend": {"enabled": enabled}})
+                with zipfile.ZipFile(path, "r") as archive:
+                    self.assertEqual(archive.read("bundle.json"), packed_manifest)
+
+            manifest["viewer"] = {
+                "camera": {"framingScale": 1.17},
+                "worldBend": {"enabled": False},
+            }
+            values["bundle.json"] = json.dumps(manifest).encode()
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            self.assertEqual(inspect_bundle(path).manifest["viewer"], manifest["viewer"])
+
+            manifest["viewer"] = {}
+            values["bundle.json"] = json.dumps(manifest).encode()
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, value in values.items():
+                    archive.writestr(name, value)
+            self.assertEqual(inspect_bundle(path).manifest["viewer"], {})
+
+            invalid_preferences = (
+                {"worldBend": {"enabled": "false"}},
+                {"worldBend": {"enabled": 0}},
+                {"worldBend": {}},
+                {"worldBend": False},
+                {"worldBend": {"enabled": False, "strength": 0}},
+                {"worldBend": {"enabled": False}, "unknown": {}},
+            )
+            for viewer in invalid_preferences:
+                with self.subTest(viewer=viewer):
+                    manifest["viewer"] = viewer
+                    values["bundle.json"] = json.dumps(manifest).encode()
+                    with zipfile.ZipFile(path, "w") as archive:
+                        for name, value in values.items():
+                            archive.writestr(name, value)
+                    with self.assertRaises(BundleValidationError):
+                        inspect_bundle(path)
+
     def test_bundled_schemas_match_repository_authorities(self):
         root = Path(__file__).resolve().parents[1]
         bundled = root / "src" / "miniverse_sdk" / "schemas"
