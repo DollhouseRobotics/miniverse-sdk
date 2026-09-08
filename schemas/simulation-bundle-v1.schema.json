@@ -100,7 +100,7 @@
             "required": ["id", "renderer", "commandId"],
             "properties": {
               "id": {"$ref": "#/$defs/id"},
-              "renderer": {"type": "string", "pattern": "^(builtin|custom)/", "maxLength": 160},
+              "renderer": {"type": "string", "pattern": "^(builtin|custom)/", "not": {"const": "builtin/heading"}, "maxLength": 160},
               "commandId": {"$ref": "#/$defs/id"},
               "options": {"type": "object"}
             },
@@ -235,7 +235,7 @@
       "required": ["id", "kind", "default", "step", "frame", "sliceLength", "update"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "kind": {"enum": ["joystick2d", "scalar", "targetPosition", "heading", "boolean", "momentary"]},
+        "kind": {"enum": ["joystick2d", "scalar", "targetPosition", "boolean", "momentary"]},
         "default": {},
         "range": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}},
         "step": {"type": "number", "exclusiveMinimum": 0},

@@ -157,7 +157,7 @@
       "required": ["id", "kind", "label", "unit", "default", "step", "deadzone", "frame", "inputName", "sliceStart", "sliceLength", "update", "timeoutMs", "failsafe"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "kind": {"enum": ["joystick2d", "scalar", "targetPosition", "heading", "boolean", "momentary"]},
+        "kind": {"enum": ["joystick2d", "scalar", "targetPosition", "boolean", "momentary"]},
         "label": {"type": "string", "minLength": 1},
         "unit": {"type": "string"},
         "default": {},

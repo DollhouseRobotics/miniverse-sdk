@@ -113,8 +113,8 @@ command's declared units and coordinate frame.
 Choose a unique, in-bounds command component for each binding and an output
 interval with `min < max` within the command range. Use `button` sources for
 `boolean` and `momentary` commands; `toggle` applies to `boolean` commands.
-Gamepad bindings support `joystick2d`, `scalar`, `heading`, `boolean`, and
-`momentary` commands that continue the current episode. The browser uses the
+Gamepad bindings support `joystick2d`, `scalar`, `boolean`, and `momentary`
+commands that continue the current episode. The browser uses the
 standard Gamepad API mapping.
 
 ## Bundle metadata conventions
