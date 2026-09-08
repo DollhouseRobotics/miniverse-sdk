@@ -820,6 +820,32 @@ class CliTest(unittest.TestCase):
             with self.assertRaises(BundleValidationError):
                 inspect_bundle(path)
 
+    def test_arrow_scale_is_optional_bounded_finite_and_arrow_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "arrow-scale.mini")
+            with zipfile.ZipFile(path) as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+            arrow = {"id": "direction", "kind": "arrow", "frame": "world"}
+
+            def inspect(gizmo):
+                manifest["gizmos"] = [gizmo]
+                with zipfile.ZipFile(path, "w") as archive:
+                    for name, value in values.items():
+                        packed = json.dumps(manifest).encode() if name == "bundle.json" else value
+                        archive.writestr(name, packed)
+                return inspect_bundle(path).manifest["gizmos"][0]
+
+            self.assertEqual(inspect(arrow), arrow)
+            for scale in (0.1, 0.5, 1, 4):
+                gizmo = {**arrow, "scale": scale}
+                self.assertEqual(inspect(gizmo), gizmo)
+            for scale in (0, 0.09, 4.01, -1, None, True, "0.5", float("nan"), float("inf")):
+                with self.subTest(scale=scale), self.assertRaises(BundleValidationError):
+                    inspect({**arrow, "scale": scale})
+            with self.assertRaises(BundleValidationError):
+                inspect({**arrow, "kind": "point", "scale": 0.5})
+
     def test_bundle_camera_framing_is_an_explicit_bounded_viewer_preference(self):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(Path(directory) / "camera.mini")

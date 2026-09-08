@@ -117,6 +117,21 @@ Gamepad bindings support `joystick2d`, `scalar`, `boolean`, and `momentary`
 commands that continue the current episode. The browser uses the
 standard Gamepad API mapping.
 
+## Arrow scale
+
+Arrow gizmos accept an optional `scale` from `0.1` through `4`:
+
+```json
+{"id":"direction","kind":"arrow","frame":"world","scale":0.5}
+```
+
+The multiplier uniformly scales the entire rendered arrow—length, shaft width,
+head, and outline—while keeping its starting point anchored. The controller's
+seven-value payload `[visible, x, y, z, dx, dy, dz]` is unchanged; the rendered
+magnitude is multiplied by `scale`. Labels are not scaled. `1` gives the stock
+appearance, and omitting `scale` is equivalent to `1`. This is an arrow-only
+presentation preference; simulation state and physics are unchanged.
+
 ## Bundle metadata conventions
 
 - **Name:** Use a simple name for the policy and what it does. Do not include
