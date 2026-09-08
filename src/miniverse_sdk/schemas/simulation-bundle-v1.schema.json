@@ -129,8 +129,13 @@
           "kind": {"enum": ["target", "arrow", "point", "frame", "path", "sphere", "box"]},
           "frame": {"type": "string", "minLength": 1, "maxLength": 80},
           "color": {"type": "string", "minLength": 1, "maxLength": 32},
-          "label": {"type": "string", "minLength": 1, "maxLength": 160}
-        }
+          "label": {"type": "string", "minLength": 1, "maxLength": 160},
+          "widthScale": {"type": "number", "minimum": 0.1, "maximum": 4}
+        },
+        "allOf": [{
+          "if": {"required": ["widthScale"]},
+          "then": {"properties": {"kind": {"const": "arrow"}}}
+        }]
       }
     },
     "webModules": {
