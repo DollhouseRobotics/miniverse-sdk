@@ -117,6 +117,21 @@ Gamepad bindings support `joystick2d`, `scalar`, `heading`, `boolean`, and
 `momentary` commands that continue the current episode. The browser uses the
 standard Gamepad API mapping.
 
+## Arrow width
+
+Arrow gizmos accept an optional `widthScale` from `0.1` through `4`:
+
+```json
+{"id":"direction","kind":"arrow","frame":"world","widthScale":0.5}
+```
+
+The multiplier applies to the shaft, arrowhead, and outline widths. `0.5`
+produces half-width arrows; `1` gives the stock width. Omit it to retain the
+stock appearance. Arrow position, direction, and length still come from the
+usual seven values `[visible, x, y, z, dx, dy, dz]` published by the controller.
+This is a per-arrow presentation preference; simulation state and physics are
+unchanged. Other gizmo kinds retain their own styling.
+
 ## Bundle metadata conventions
 
 - **Name:** Use a simple name for the policy and what it does. Do not include
