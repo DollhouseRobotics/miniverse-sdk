@@ -249,6 +249,7 @@
         "update": {"enum": ["continuous", "on-release", "edge"]},
         "restart": {"const": "episode"},
         "floorPicking": {"type": "boolean"},
+        "spatialPicking": {"type": "boolean"},
         "gizmoId": {"$ref": "#/$defs/id"},
         "spatialLimit": {
           "type": "object",

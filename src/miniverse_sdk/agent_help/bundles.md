@@ -57,6 +57,31 @@ presentation only and applies consistently on all viewer surfaces; it does not
 change simulation state or physics. Omit either preference
 unless the bundle deliberately needs it; validation does not inject defaults.
 
+## Draggable 3D points
+
+To let a user place a point in 3D, bind a world-frame `point` gizmo to a
+three-component `targetPosition` command and set `spatialPicking: true`:
+
+```json
+"commands": [{
+  "id": "waypoint-position", "kind": "targetPosition",
+  "default": [0, 0, 1], "step": 0.05,
+  "frame": "world", "sliceLength": 3, "update": "continuous",
+  "spatialPicking": true, "gizmoId": "waypoint"
+}],
+"ui": {"components": [{
+  "id": "waypoint-editor", "renderer": "builtin/target-position",
+  "commandId": "waypoint-position"
+}]},
+"gizmos": [{"id": "waypoint", "kind": "point", "frame": "world"}]
+```
+
+The viewer drags the point in the camera-facing plane through its current
+position. Orbit the camera before another drag to move it along a different
+plane. Spatial picking supports mouse and touch and uses the command's normal
+snapping, update mode, and acknowledgement path. Do not combine
+`spatialPicking` and `floorPicking` on one command.
+
 ## Gamepad controls
 
 Add a `builtin/gamepad` UI

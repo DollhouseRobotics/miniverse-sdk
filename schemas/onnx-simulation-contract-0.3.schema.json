@@ -173,6 +173,7 @@
         "failsafe": {},
         "hidden": {"type": "boolean"},
         "floorPicking": {"type": "boolean"},
+        "spatialPicking": {"type": "boolean"},
         "gizmoId": {"$ref": "#/$defs/id"},
         "labelId": {"$ref": "#/$defs/id"},
         "spatialLimit": {
