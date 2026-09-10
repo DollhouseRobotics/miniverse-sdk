@@ -82,6 +82,37 @@ plane. Spatial picking supports mouse and touch and uses the command's normal
 snapping, update mode, and acknowledgement path. Do not combine
 `spatialPicking` and `floorPicking` on one command.
 
+## Policy-specific command constraints
+
+Define `transform_commands(commands)` on the Python controller when a command
+needs a policy-specific constraint that its normal control cannot express. This
+is especially useful for command-bound 3D gizmos: constrain targets to the
+region the policy can actually reach so the user cannot leave a gizmo at an
+impossible command. Controls with natural bounds, such as a range-limited
+slider, usually need only the command's declared `range`.
+
+The callback receives the complete proposed command map and must return the
+complete accepted map with the same command IDs. Accepted values drive both the
+next policy step and command-bound gizmos. For example, this clamps a target to
+six feet from the world origin:
+
+```python
+import math
+
+def transform_commands(self, commands):
+    accepted = dict(commands)
+    target = list(commands["target-position"])
+    distance = math.hypot(target[0], target[1])
+    if distance > 1.8288:
+        target[0] *= 1.8288 / distance
+        target[1] *= 1.8288 / distance
+    accepted["target-position"] = target
+    return accepted
+```
+
+Return values must satisfy each command's declared type, shape, finite-value,
+and range requirements.
+
 ## Gamepad controls
 
 Add a `builtin/gamepad` UI
