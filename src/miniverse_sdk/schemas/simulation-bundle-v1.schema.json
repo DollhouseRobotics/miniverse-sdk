@@ -248,6 +248,7 @@
         "sliceLength": {"type": "integer", "minimum": 1, "maximum": 64},
         "update": {"enum": ["continuous", "on-release", "edge"]},
         "restart": {"const": "episode"},
+        "hidden": {"type": "boolean"},
         "floorPicking": {"type": "boolean"},
         "spatialPicking": {"type": "boolean"},
         "gizmoId": {"$ref": "#/$defs/id"},

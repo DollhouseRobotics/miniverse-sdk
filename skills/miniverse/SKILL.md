@@ -39,6 +39,8 @@ When authoring or diagnosing controller observations:
 - Treat every `context.models` entry as an equal named model handle and let the
   runtime select execution providers. Return `StepResult.actuation` in
   canonical MJCF actuator order and physical units.
+- Use sparse `StepResult.gizmo_visibility` and `control_visibility` boolean
+  maps to gate declared gizmo IDs and command controls at runtime.
 - Put `physics_hz`, `policy_hz`, `publish_hz`, and `control_loop` on the Python
   controller class. The controller owns all randomness: hardcode or construct
   its RNG there when needed.

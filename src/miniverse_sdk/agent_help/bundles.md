@@ -113,6 +113,26 @@ def transform_commands(self, commands):
 Return values must satisfy each command's declared type, shape, finite-value,
 and range requirements.
 
+## Runtime visibility
+
+Python controllers can hide or show declared gizmos and on-screen command
+controls by returning sparse maps in `StepResult`:
+
+```python
+return StepResult(
+    actuation=targets,
+    gizmo_visibility={"goal": distance > 0.25},
+    control_visibility={"target-position": not autonomous_mode},
+)
+```
+
+`gizmo_visibility` uses IDs from `gizmos`, while `control_visibility` uses IDs
+from `commands`. Values must be booleans. An update persists when later steps
+omit that ID and resets to visible when the episode resets. A gizmo is shown
+only when both this gate and the first `visible` value in its data array are
+true. A command with static `hidden: true` stays hidden. Hiding a control is
+presentation-only: the command and any gamepad binding remain active.
+
 ## Gamepad controls
 
 Add a `builtin/gamepad` UI
