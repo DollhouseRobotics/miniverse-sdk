@@ -29,6 +29,12 @@ journal. A flush advances its acknowledgement only after Miniverse reports a
 durable commit. In Python, call `run.flush()` again after an interruption to
 retry the same sealed layer.
 
+Flushed metrics appear on the run page within seconds. Flush as often as you
+want them live, for example every training iteration or every 10–30 seconds.
+Each flush uploads one small layer, and Miniverse compacts layers in the
+background, so frequent flushes do not hit a layer limit. Do not batch metrics
+into long intervals to save layers.
+
 Upload one or more named ONNX files at a checkpoint without rebuilding or
 uploading the base bundle:
 
