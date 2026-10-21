@@ -118,7 +118,15 @@ class Client:
             )
             save_oauth_credential(self.credential)
 
-    def upload(self, url: str, path: Path, required_headers: dict[str, str] | None = None) -> None:
+    def upload(
+        self,
+        url: str,
+        path: Path,
+        required_headers: dict[str, str] | None = None,
+        *,
+        content_type: str = "application/vnd.dhr.simulation-bundle+zip",
+    ) -> None:
+        url = urllib.parse.urljoin(self.origin + "/", url)
         parsed = urllib.parse.urlsplit(url)
         connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
         last_error: Exception | None = None
@@ -128,10 +136,10 @@ class Client:
                 target = urllib.parse.urlunsplit(("", "", parsed.path, parsed.query, ""))
                 connection.putrequest("PUT", target)
                 headers = {key.lower(): value for key, value in (required_headers or {}).items()}
-                headers.setdefault("content-type", "application/vnd.dhr.simulation-bundle+zip")
+                headers.setdefault("content-type", content_type)
+                headers.setdefault("content-length", str(path.stat().st_size))
                 for key, value in headers.items():
                     connection.putheader(key, value)
-                connection.putheader("content-length", str(path.stat().st_size))
                 connection.putheader("user-agent", f"miniverse-sdk/{__version__}")
                 connection.endheaders()
                 with path.open("rb") as source:
@@ -153,6 +161,12 @@ class Client:
         if isinstance(last_error, ApiError):
             raise last_error
         raise ApiError(0, f"archive upload failed: {last_error}", "upload_failed")
+
+    def training(self, spool_dir: str | Path | None = None):
+        """Return the training-run API with a resumable local spool."""
+        from .training import Training
+
+        return Training(self, spool_dir)
 
     def wait_for_import(self, status_url: str, timeout: int = 3600) -> dict[str, Any]:
         deadline = time.monotonic() + timeout

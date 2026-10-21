@@ -29,6 +29,7 @@ miniverse agent-help terrain
 miniverse agent-help upload
 miniverse agent-help sessions
 miniverse agent-help tests
+miniverse agent-help training
 ```
 
 Read `onnx` BEFORE exporting a checkpoint: it lists the TensorRT-RTX

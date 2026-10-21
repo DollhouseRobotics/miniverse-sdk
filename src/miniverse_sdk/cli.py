@@ -24,9 +24,10 @@ from .bundles import BundleValidationError, inspect_bundle
 from .challenge_bundles import inspect_challenge_bundle
 from .config import OAuthCredential, auth_file, auth_store, credential, delete_oauth_credential, origin, save_oauth_credential
 from .terrain import TerrainValidationError, build_heightfield_glb, heightfield_size_warnings, inspect_heightfield_glb, load_height_array
+from .training import Training
 from .validation import ModelValidation, validate_bundle_model_backends, validate_model
 
-TOPICS = {"auth", "bundles", "challenges", "environments", "mcp", "upload", "sessions", "tests", "onnx", "terrain"}
+TOPICS = {"auth", "bundles", "challenges", "environments", "mcp", "upload", "sessions", "tests", "onnx", "terrain", "training"}
 TEST_NONPASSING_EXIT = 4
 TEST_INFRASTRUCTURE_EXIT = 5
 TEST_OUTCOMES = {"passed", "assertion_failed", "policy_failed", "test_error", "timed_out", "cancelled", "infrastructure_failed"}
@@ -267,6 +268,24 @@ def _challenge_bundle(value: str) -> dict[str, str]:
     return {"bundleId": bundle_id, "bundleRevisionId": revision_id}
 
 
+def _json_argument(value: str) -> Any:
+    path = Path(value)
+    raw = path.read_text(encoding="utf-8") if path.is_file() else value
+    return json.loads(raw)
+
+
+def _checkpoint_models(values: list[str]) -> dict[str, Path]:
+    models: dict[str, Path] = {}
+    for value in values:
+        model_id, separator, path = value.partition("=")
+        if not separator or not model_id or not path:
+            raise ValueError("checkpoint models must be MODEL_ID=PATH")
+        if model_id in models:
+            raise ValueError(f"duplicate checkpoint model ID: {model_id}")
+        models[model_id] = Path(path)
+    return models
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="miniverse",
@@ -295,6 +314,44 @@ def parser() -> argparse.ArgumentParser:
     token_delete = token_commands.add_parser("delete", help="Delete a personal API token")
     token_delete.add_argument("token_id", help="Token ID returned by create or list")
     for leaf in (token_create, token_list, token_delete):
+        leaf.add_argument("--json", action="store_true", dest="command_json")
+    training = commands.add_parser("training", help="Create runs and ingest metrics and checkpoints")
+    training_commands = training.add_subparsers(dest="training_command", required=True)
+    training_create = training_commands.add_parser("create", help="Create or resume an idempotent training run")
+    training_create.add_argument("--name", required=True)
+    training_create.add_argument("--organization", required=True, help="Organization that owns the private run")
+    training_create.add_argument("--base", required=True, help="Pinned base bundle as ID@REVISION_ID")
+    training_create.add_argument("--project", default="")
+    training_create.add_argument("--config", default="{}", help="JSON object or path to a JSON file")
+    training_create.add_argument("--tag", action="append", default=[])
+    training_create.add_argument("--idempotency-key")
+    training_list = training_commands.add_parser("list", help="List accessible training runs")
+    training_list.add_argument("--cursor")
+    training_get = training_commands.add_parser("get", help="Get a run, checkpoints, and metric names")
+    training_get.add_argument("run_id")
+    training_get.add_argument("--cursor")
+    training_update = training_commands.add_parser("update", help="Update mutable run metadata")
+    training_update.add_argument("run_id")
+    training_update.add_argument("--name")
+    training_update.add_argument("--status", choices=("running", "completed", "failed", "stopped"))
+    training_update.add_argument("--tags", help="JSON array or path to a JSON file")
+    training_update.add_argument("--expected-version", type=int)
+    training_log = training_commands.add_parser("log-rrd", help="Journal JSONL scalar samples and upload one RRD layer")
+    training_log.add_argument("run_id")
+    training_log.add_argument("--file", required=True, help="JSONL rows, or - for stdin")
+    training_log.add_argument("--spool")
+    training_checkpoint = training_commands.add_parser("checkpoint", help="Upload checkpoint model files without repacking the bundle")
+    training_checkpoint.add_argument("run_id")
+    training_checkpoint.add_argument("--step", type=int, required=True)
+    training_checkpoint.add_argument("--label", required=True)
+    training_checkpoint.add_argument("--model", action="append", required=True, metavar="MODEL_ID=PATH")
+    training_checkpoint.add_argument("--idempotency-key")
+    training_checkpoint.add_argument("--spool")
+    training_attach = training_commands.add_parser("attach", help="Attach a retained recording to a checkpoint")
+    training_attach.add_argument("run_id")
+    training_attach.add_argument("checkpoint_id")
+    training_attach.add_argument("recording_id")
+    for leaf in (training_create, training_list, training_get, training_update, training_log, training_checkpoint, training_attach):
         leaf.add_argument("--json", action="store_true", dest="command_json")
     bundle = commands.add_parser("bundle")
     bundle_commands = bundle.add_subparsers(dest="bundle_command", required=True)
@@ -507,6 +564,64 @@ def run(args: argparse.Namespace) -> Any:
         if args.token_command == "list":
             return client.request("/api/v1/tokens")
         return client.request(f"/api/v1/tokens/{urllib.parse.quote(args.token_id, safe='')}", method="DELETE")
+    if args.command == "training":
+        api_origin = origin(args.origin)
+        saved, _ = credential(api_origin)
+        client = Client(api_origin, saved)
+        runs = Training(client, getattr(args, "spool", None))
+        if args.training_command == "create":
+            bundle_id, revision_id = _bundle_revision(args.base)
+            config = _json_argument(args.config)
+            if not isinstance(config, dict):
+                raise ValueError("training config must be a JSON object")
+            run = runs.create(
+                args.name, bundle_id, revision_id, organization_id=args.organization, project=args.project, config=config,
+                tags=args.tag, idempotency_key=args.idempotency_key,
+            )
+            return run.get()
+        if args.training_command == "list":
+            return runs.list(cursor=args.cursor)
+        run = runs.resume(args.run_id)
+        if args.training_command == "get":
+            return run.get(cursor=args.cursor)
+        if args.training_command == "update":
+            changes = {
+                key: value for key, value in {
+                    "name": args.name, "status": args.status,
+                    "tags": _json_argument(args.tags) if args.tags else None,
+                    "expectedVersion": args.expected_version,
+                }.items() if value is not None
+            }
+            if not changes:
+                raise ValueError("provide at least one training run update")
+            if "tags" in changes and not isinstance(changes["tags"], list):
+                raise ValueError("training tags must be a JSON array")
+            return run.update(**changes)
+        if args.training_command == "log-rrd":
+            source = sys.stdin if args.file == "-" else Path(args.file).open("r", encoding="utf-8")
+            try:
+                count = 0
+                for line in source:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    if not isinstance(row, dict):
+                        raise ValueError("each metric line must be a JSON object")
+                    if isinstance(row.get("metrics"), dict):
+                        run.log(row["metrics"], step=row["step"], wall_time=row.get("wallTime"))
+                    else:
+                        run.log(str(row["name"]), row["value"], step=row["step"], wall_time=row.get("wallTime"))
+                    count += 1
+            finally:
+                if source is not sys.stdin:
+                    source.close()
+            return {**run.flush(), "loggedRows": count}
+        if args.training_command == "checkpoint":
+            return run.checkpoint(
+                args.step, args.label, _checkpoint_models(args.model),
+                idempotency_key=args.idempotency_key,
+            )
+        return run.attach_recording(args.checkpoint_id, args.recording_id)
     if args.command == "model":
         path = Path(args.model)
         return _model_result(validate_model(path), strict=args.strict, model_id=path.stem)

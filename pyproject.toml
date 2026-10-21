@@ -24,6 +24,9 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
 ]
 
+[project.optional-dependencies]
+training = ["rerun-sdk[catalog]==0.36.0"]
+
 [project.scripts]
 miniverse = "miniverse_sdk.cli:main"
 
