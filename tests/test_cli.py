@@ -846,6 +846,35 @@ class CliTest(unittest.TestCase):
             with self.assertRaises(BundleValidationError):
                 inspect({**arrow, "kind": "point", "scale": 0.5})
 
+    def test_body_ghost_bundle_roundtrip_and_pose_declaration_constraints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = fixture(Path(directory) / "body-ghost.mini")
+            with zipfile.ZipFile(path) as archive:
+                values = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(values["bundle.json"])
+            body = {"id": "reference-base", "kind": "body", "frame": "world", "bodyId": "base"}
+
+            def inspect(gizmo):
+                manifest["gizmos"] = [gizmo]
+                with zipfile.ZipFile(path, "w") as archive:
+                    for name, value in values.items():
+                        archive.writestr(name, json.dumps(manifest).encode() if name == "bundle.json" else value)
+                return inspect_bundle(path).manifest["gizmos"][0]
+
+            self.assertEqual(inspect(body), body)
+            for opacity in (0, 0.35, 1):
+                ghost = {**body, "opacity": opacity, "color": "#1299f2"}
+                self.assertEqual(inspect(ghost), ghost)
+            invalid = [
+                {key: value for key, value in body.items() if key != "bodyId"},
+                {**body, "bodyId": ""}, {**body, "frame": "root"},
+                {**body, "kind": "point"}, {**body, "scale": 1},
+                *[{**body, "opacity": value} for value in (-1, 1.01, True, None, "0.3", float("nan"), float("inf"))],
+            ]
+            for gizmo in invalid:
+                with self.subTest(gizmo=gizmo), self.assertRaises(BundleValidationError):
+                    inspect(gizmo)
+
     def test_bundle_camera_framing_is_an_explicit_bounded_viewer_preference(self):
         with tempfile.TemporaryDirectory() as directory:
             path = fixture(Path(directory) / "camera.mini")
