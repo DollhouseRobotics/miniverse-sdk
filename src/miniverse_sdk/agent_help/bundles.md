@@ -211,6 +211,27 @@ magnitude is multiplied by `scale`. Labels are not scaled. `1` gives the stock
 appearance, and omitting `scale` is equivalent to `1`. This is an arrow-only
 presentation preference; simulation state and physics are unchanged.
 
+## Reference body ghosts
+
+Use `body` gizmos to show a translucent robot at controller-supplied reference
+poses. Declare one per embodiment body you want to display:
+
+```json
+{"id":"reference-base","kind":"body","bodyId":"base","frame":"world","color":"#1299f2","opacity":0.35}
+```
+
+Return `[visible, x, y, z, qx, qy, qz, qw]` in `StepResult.gizmos` for each ID.
+Positions are world-frame meters and visible rotations are unit XYZW
+quaternions. Drive every body from the same reference-animation time and
+coordinate transform. The viewer reuses each named body's local visual
+surfaces at that pose; the ghost is a display and leaves physics unchanged.
+
+`bodyId` names an existing embodiment body, `frame` is `world`, and optional
+`opacity` ranges from `0` (transparent) to `1` (opaque), defaulting to `0.35`.
+The default color is blue. Each body consumes one of the 64 gizmo slots.
+Hidden/reset payloads may be all zero. Episode resets clear poses until the
+next policy result; visibility controls and recorded playback also apply.
+
 ## Bundle metadata conventions
 
 - **Name:** Use a simple name for the policy and what it does. Do not include

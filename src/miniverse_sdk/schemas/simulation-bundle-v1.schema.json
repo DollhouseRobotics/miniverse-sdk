@@ -126,15 +126,21 @@
         "required": ["id", "kind", "frame"],
         "properties": {
           "id": {"$ref": "#/$defs/id"},
-          "kind": {"enum": ["target", "arrow", "point", "frame", "path", "sphere", "box"]},
+          "kind": {"enum": ["target", "arrow", "point", "frame", "path", "sphere", "box", "body"]},
           "frame": {"type": "string", "minLength": 1, "maxLength": 80},
           "color": {"type": "string", "minLength": 1, "maxLength": 32},
           "label": {"type": "string", "minLength": 1, "maxLength": 160},
-          "scale": {"type": "number", "minimum": 0.1, "maximum": 4}
+          "scale": {"type": "number", "minimum": 0.1, "maximum": 4},
+          "bodyId": {"type": "string", "minLength": 1, "maxLength": 256},
+          "opacity": {"type": "number", "minimum": 0, "maximum": 1}
         },
         "allOf": [{
           "if": {"required": ["scale"]},
           "then": {"properties": {"kind": {"const": "arrow"}}}
+        }, {
+          "if": {"properties": {"kind": {"const": "body"}}},
+          "then": {"required": ["bodyId"], "properties": {"frame": {"const": "world"}}},
+          "else": {"not": {"anyOf": [{"required": ["bodyId"]}, {"required": ["opacity"]}]}}
         }]
       }
     },
