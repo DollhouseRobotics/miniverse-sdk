@@ -34,6 +34,12 @@ When authoring or diagnosing controller observations:
   contract ordering and static/runtime model values from `sim_data.model`; read
   joint, body, contact, tick, and time state from `sim_data`. Keep policy code
   simulator-neutral and use the public controller interfaces.
+- Index joint state by ID with `sim_data.model.joint_slice(...)`, never by
+  fixed offsets: the joint layout differs between simulator profiles. Read
+  the root pose from `body_transforms` to run on every profile.
+- Keep ONNX models small, since desktop viewers download them on every visit:
+  store lookup tables at the policy rate and without padding. Read
+  `miniverse agent-help bundles` for both rules.
 - Construct every ONNX input in bundle controller code from `sim_data`,
   commands, deterministic controller state, and declared constants.
 - Treat every `context.models` entry as an equal named model handle and let the

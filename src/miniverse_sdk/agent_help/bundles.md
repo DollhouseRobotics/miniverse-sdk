@@ -19,6 +19,51 @@ its physics/policy/publication timing, owns randomness, sees all models through
 physical actuation in canonical MJCF actuator order. Optional `metadata` is a
 freeform JSON object and has no execution semantics.
 
+## Reading joint state
+
+`sim_data.joint_positions` and `sim_data.joint_velocities` are flat arrays over
+the joints in `sim_data.model.joint_ids`, in that order, with per-joint widths
+in `joint_position_widths` and `joint_velocity_widths`. The layout depends on
+the simulator profile. MuJoCo profiles list every MJCF joint, including a
+floating root's free joint (7 position values: XYZ, then a WXYZ quaternion; 6
+velocity values) and ball joints (4 and 3). Isaac profiles list articulation
+DOFs only and report the root through `body_transforms` and `body_velocities`.
+
+Select values by ID, never by fixed offsets or by assuming one value per
+actuator:
+
+```python
+def step(self, step):
+    data = step.sim_data
+    model = data.model
+    positions = np.asarray(data.joint_positions)
+    velocities = np.asarray(data.joint_velocities)
+    q = np.concatenate([positions[model.joint_slice(j, velocity=False)] for j in JOINT_IDS])
+    qd = np.concatenate([velocities[model.joint_slice(j, velocity=True)] for j in JOINT_IDS])
+    root = model.body_ids.index(model.root_body_id)
+    root_pose = np.asarray(data.body_transforms[root])  # x, y, z, qx, qy, qz, qw
+```
+
+Read the root from `body_transforms` and `body_velocities` when the bundle
+should run on every profile. Reading the free joint with `joint_slice` works
+only on MuJoCo profiles.
+
+## Model size
+
+Desktop viewers download every model file each time they open a non-Isaac
+Miniverse, and loading a model takes several times its size in browser memory.
+Model bytes set load time directly: a 1 GB model takes over a minute to
+download on a typical connection and can crash the tab. Keep each model to the
+weights and data the policy actually reads, ideally tens of megabytes:
+
+- Store embedded lookup tables, such as reference-motion banks, at the rate the
+  policy reads them. A 50 Hz policy indexing a 500 Hz table reads only every
+  tenth row; downsample the table and index it by policy step.
+- Concatenate variable-length clips and index them with a per-clip offset
+  table instead of padding every clip to the longest one.
+- Check the exported file size before bundling, and inspect the largest
+  initializers when it is larger than expected.
+
 Set `primarySimulator` to `mujoco`, `browser-mujoco`,
 `isaac-sim-cpu-physx`, or `isaac-sim-gpu-physx`. The `browser-mujoco` profile
 uses the model's `mujoco-cpu` compatibility declaration. Every profile except
